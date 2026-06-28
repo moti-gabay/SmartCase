@@ -4,9 +4,10 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")   // pooled connection – used by Prisma Client at runtime
-  directUrl = env("DIRECT_URL")     // direct connection – used by prisma migrate only
+  provider = "postgresql"
+  // In Prisma 7 the url field is no longer set here.
+  // • CLI/migrations: url is read from prisma.config.ts → datasource.url
+  // • Runtime: url is passed via PrismaPg adapter in src/lib/prisma.ts
 }
 
 // ─── Enums ────────────────────────────────────────────────────────────────────

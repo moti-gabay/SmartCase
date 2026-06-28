@@ -12,7 +12,17 @@
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('tailwindcss:', d.get\\('dependencies',{}\\).get\\('tailwindcss',''\\) or d.get\\('devDependencies',{}\\).get\\('tailwindcss',''\\)\\); print\\('next:', d['dependencies'].get\\('next',''\\)\\); print\\('prisma:', d['devDependencies'].get\\('prisma',''\\) or d['dependencies'].get\\('prisma',''\\)\\)\")",
       "Bash(npx tsc *)",
       "Bash(npm run *)",
-      "Bash(python3 -c \"import json; d=json.load\\(open\\('package.json'\\)\\); [print\\(f'  {k}: {v}'\\) for k,v in d['scripts'].items\\(\\)]\")"
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('package.json'\\)\\); [print\\(f'  {k}: {v}'\\) for k,v in d['scripts'].items\\(\\)]\")",
+      "Bash(openssl rand *)",
+      "Bash(node -e \"const p = require\\('@prisma/adapter-pg/package.json'\\); console.log\\(p.version\\)\")",
+      "Bash(node -e \"const p = require\\('pg/package.json'\\); console.log\\(p.version\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d.get\\('version'\\), d.get\\('main'\\), d.get\\('exports',{}\\).get\\('.',{}\\).get\\('require',{}\\)\\)\")",
+      "Bash(nc -zv db.tgejugnnedmnkzwjccro.supabase.co 5432)",
+      "Bash(curl -sv --max-time 5 postgresql://postgres:REDACTED@db.tgejugnnedmnkzwjccro.supabase.co:5432)",
+      "Bash(host db.tgejugnnedmnkzwjccro.supabase.co)",
+      "Bash(ping -c 1 -W 3 db.tgejugnnedmnkzwjccro.supabase.co)",
+      "Bash(getent hosts *)",
+      "Bash(nslookup db.tgejugnnedmnkzwjccro.supabase.co)"
     ]
   }
 }
