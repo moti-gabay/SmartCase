@@ -9,6 +9,8 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // CLI operations (migrate, db push) must use the direct connection, not the pooler.
+    // Set DIRECT_URL to the port-5432 Supabase URL; DATABASE_URL can be the pooler.
+    url: process.env["DIRECT_URL"] ?? process.env["DATABASE_URL"],
   },
 });

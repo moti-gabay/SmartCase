@@ -16,6 +16,7 @@ enum UserRole {
   ADMIN
   SUPERVISOR
   AGENT
+  CLIENT
 }
 
 enum CaseStatus {

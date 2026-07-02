@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -35,7 +36,13 @@ interface SidebarProps {
 }
 
 export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
-  const pathname = usePathname();
+  const pathname   = usePathname();
+  const router     = useRouter();
+  const { data: session } = useSession();
+
+  const userName    = session?.user?.name  ?? "משתמש";
+  const userEmail   = session?.user?.email ?? "";
+  const initials    = userName.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 
   return (
     <aside
@@ -107,22 +114,25 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
             {!isCollapsed && <span>{label}</span>}
           </Link>
         ))}
-        <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-indigo-200 hover:bg-white/10 hover:text-red-300 transition-all">
+        <button
+          onClick={() => signOut({ callbackUrl: "/login" })}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-indigo-200 hover:bg-white/10 hover:text-red-300 transition-all"
+        >
           <LogOut className="h-5 w-5 shrink-0" />
           {!isCollapsed && <span>התנתק</span>}
         </button>
       </div>
 
-      {/* Agent badge */}
+      {/* Logged-in user badge */}
       {!isCollapsed && (
         <div className="border-t border-white/10 p-4">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500 text-xs font-bold text-white">
-              מג
+              {initials || "?"}
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-white">מגי כהן</p>
-              <p className="text-[11px] text-indigo-400">סוכן</p>
+              <p className="truncate text-sm font-medium text-white">{userName}</p>
+              <p className="truncate text-[11px] text-indigo-400">{userEmail}</p>
             </div>
           </div>
         </div>

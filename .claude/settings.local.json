@@ -22,7 +22,13 @@
       "Bash(host db.tgejugnnedmnkzwjccro.supabase.co)",
       "Bash(ping -c 1 -W 3 db.tgejugnnedmnkzwjccro.supabase.co)",
       "Bash(getent hosts *)",
-      "Bash(nslookup db.tgejugnnedmnkzwjccro.supabase.co)"
+      "Bash(nslookup db.tgejugnnedmnkzwjccro.supabase.co)",
+      "Bash(npm ls *)",
+      "Bash(npm explain *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('peerDeps:', json.dumps\\(d.get\\('peerDependencies',{}\\), indent=2\\)\\)\")",
+      "Bash(nslookup aws-0-eu-west-1.pooler.supabase.com)",
+      "Bash(nc *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('version:', d['version']\\)\")"
     ]
   }
 }
