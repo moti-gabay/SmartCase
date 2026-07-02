@@ -2,9 +2,17 @@ import { Header } from "@/components/layout/header";
 import { StatsCards } from "@/components/dashboard/stats-cards";
 import { PipelineBoard } from "@/components/dashboard/pipeline-board";
 import { AlertsPanel } from "@/components/dashboard/alerts-panel";
-import { MOCK_STATS, MOCK_CASES, MOCK_ALERTS } from "@/lib/mock-data";
+import { getDashboardStats, getCases, getAlerts } from "@/lib/queries";
 
-export default function DashboardPage() {
+export const dynamic = "force-dynamic";
+
+export default async function DashboardPage() {
+  const [stats, cases, alerts] = await Promise.all([
+    getDashboardStats(),
+    getCases(),
+    getAlerts(),
+  ]);
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <Header
@@ -17,7 +25,7 @@ export default function DashboardPage() {
         {/* Main column */}
         <main className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
           {/* KPI stats */}
-          <StatsCards stats={MOCK_STATS} />
+          <StatsCards stats={stats} />
 
           {/* Pipeline board */}
           <section>
@@ -26,16 +34,16 @@ export default function DashboardPage() {
                 צינור תיקים
               </h2>
               <p className="text-xs text-slate-400">
-                {MOCK_CASES.length} תיקים פעילים
+                {cases.length} תיקים פעילים
               </p>
             </div>
-            <PipelineBoard cases={MOCK_CASES} />
+            <PipelineBoard cases={cases} />
           </section>
         </main>
 
         {/* Alerts sidebar panel – pinned on the left (end side in RTL) */}
         <aside className="hidden w-80 shrink-0 overflow-y-auto border-e border-slate-200 bg-white p-5 xl:block">
-          <AlertsPanel alerts={MOCK_ALERTS} />
+          <AlertsPanel alerts={alerts} />
         </aside>
       </div>
     </div>

@@ -3,6 +3,10 @@
 import type { NextAuthConfig } from "next-auth"
 
 export const authConfig = {
+  // Trust the deployment host header. Required for `next start` and proxied
+  // deployments (Vercel sets this automatically, self-hosted does not).
+  trustHost: true,
+
   pages: {
     signIn: "/login",
   },
@@ -15,7 +19,11 @@ export const authConfig = {
       const isProtected =
         path.startsWith("/dashboard") ||
         path.startsWith("/cases") ||
-        path.startsWith("/clients")
+        path.startsWith("/clients") ||
+        path.startsWith("/tasks") ||
+        path.startsWith("/documents") ||
+        path.startsWith("/ai-tools") ||
+        path.startsWith("/settings")
 
       const isAuthPage = path === "/login" || path === "/register"
 

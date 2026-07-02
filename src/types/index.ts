@@ -248,6 +248,24 @@ export interface ClientListItem {
   lastActivityDate?: string;
 }
 
+// ─── Tasks (cross-case list) ───────────────────────────────────────────────────
+
+export interface TaskListItem {
+  id: string;
+  title: string;
+  description?: string | null;
+  dueDate?: string | null;
+  priority: Priority;
+  status: TaskStatus;
+  completedAt?: string | null;
+  createdAt: string;
+  assignedToName?: string | null;
+  caseId: string;
+  caseNumber: string;
+  clientName: string;
+  isOverdue: boolean;
+}
+
 export type SortField = "fullName" | "createdAt" | "lastActivityDate" | "activeCasesCount" | "addressCity";
 export type SortDir   = "asc" | "desc";
 export interface ClientSort { field: SortField; dir: SortDir }

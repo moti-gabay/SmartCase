@@ -1,7 +1,12 @@
-import { PrismaClient, UserRole, CaseType, CaseStatus, Priority, DocumentType, Gender, EmploymentStatus } from "../src/generated/prisma";
+import "dotenv/config";
+import { PrismaClient, UserRole, CaseType, CaseStatus, Priority, DocumentType, Gender, EmploymentStatus } from "../src/generated/prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
 
-const prisma = new PrismaClient();
+// Prisma 7: the driver adapter owns the connection. CLI/seed use DIRECT_URL.
+const adapter = new PrismaPg(process.env.DIRECT_URL ?? process.env.DATABASE_URL!);
+// @ts-ignore – constructor accepts adapter in Prisma 7
+const prisma = new PrismaClient({ adapter });
 
 async function main() {
   console.log("🌱 Starting seed...");
