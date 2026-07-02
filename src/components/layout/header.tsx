@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Bell, Search, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -39,10 +40,12 @@ export function Header({ title, subtitle }: HeaderProps) {
         </button>
 
         {/* New case CTA */}
-        <Button size="sm" className="gap-1.5">
-          <Plus className="h-4 w-4" />
-          תיק חדש
-        </Button>
+        <Link href="/cases/new">
+          <Button size="sm" className="gap-1.5">
+            <Plus className="h-4 w-4" />
+            תיק חדש
+          </Button>
+        </Link>
       </div>
     </header>
   );

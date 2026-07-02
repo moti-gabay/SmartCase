@@ -384,6 +384,20 @@ export interface CaseOption {
   clientName: string;
 }
 
+export interface ClientOption {
+  id: string;
+  fullName: string;
+  nationalId: string;
+}
+
+export async function getClientOptions(): Promise<ClientOption[]> {
+  return prisma.client.findMany({
+    where: { isActive: true },
+    select: { id: true, fullName: true, nationalId: true },
+    orderBy: { fullName: "asc" },
+  });
+}
+
 export async function getCaseOptions(): Promise<CaseOption[]> {
   const rows = await prisma.case.findMany({
     select: { id: true, caseNumber: true, client: { select: { fullName: true } } },

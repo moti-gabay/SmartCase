@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/../auth";
-import type { CaseStatus, Priority, TaskStatus } from "@/types";
+import type { CaseStatus, CaseType, Priority, TaskStatus, Gender, EmploymentStatus } from "@/types";
 
 async function requireUserId(): Promise<string> {
   const session = await auth();
@@ -80,6 +80,117 @@ export async function setTaskStatus(taskId: string, status: TaskStatus) {
     },
   });
   revalidatePath("/tasks");
+}
+
+// ─── Create case ───────────────────────────────────────────────────────────────
+
+const CASE_TYPES = [
+  "DISABILITY_PENSION", "GENERAL_DISABILITY_ALLOWANCE", "MOBILITY_ALLOWANCE",
+  "INCOME_SUPPORT", "LONG_TERM_CARE", "SURVIVORS_BENEFIT", "WORK_ACCIDENT",
+  "OCCUPATIONAL_DISEASE", "APPEAL", "OTHER",
+] as const;
+
+const newClientSchema = z.object({
+  fullName: z.string().min(2),
+  nationalId: z.string().min(5),
+  dateOfBirth: z.string().min(4),
+  gender: z.enum(["MALE", "FEMALE", "OTHER"]),
+  phone: z.string().min(3),
+  email: z.string().email().optional().or(z.literal("")),
+  addressCity: z.string().optional(),
+  employmentStatus: z.enum(["EMPLOYED", "SELF_EMPLOYED", "UNEMPLOYED", "RETIRED", "STUDENT", "UNABLE_TO_WORK"]).optional(),
+  primaryCondition: z.string().optional(),
+});
+
+const createCaseSchema = z.object({
+  clientMode: z.enum(["existing", "new"]),
+  existingClientId: z.string().optional(),
+  newClient: newClientSchema.optional(),
+  caseType: z.enum(CASE_TYPES),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]),
+  claimedPercentage: z.number().int().min(0).max(100).optional(),
+  claimDescription: z.string().optional(),
+  submissionDeadline: z.string().optional(),
+  assignedAgentId: z.string().optional(),
+});
+
+export type CreateCaseInput = z.infer<typeof createCaseSchema>;
+
+async function nextCaseNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `SC-${year}-`;
+  const last = await prisma.case.findFirst({
+    where: { caseNumber: { startsWith: prefix } },
+    orderBy: { caseNumber: "desc" },
+    select: { caseNumber: true },
+  });
+  const lastSeq = last ? parseInt(last.caseNumber.slice(prefix.length), 10) || 0 : 0;
+  return `${prefix}${String(lastSeq + 1).padStart(5, "0")}`;
+}
+
+export async function createCase(input: CreateCaseInput): Promise<{ id: string }> {
+  const userId = await requireUserId();
+  const data = createCaseSchema.parse(input);
+
+  // Resolve the client (existing or newly created).
+  let clientId: string;
+  if (data.clientMode === "existing") {
+    if (!data.existingClientId) throw new Error("יש לבחור לקוח");
+    clientId = data.existingClientId;
+  } else {
+    const nc = newClientSchema.parse(data.newClient);
+    const exists = await prisma.client.findUnique({ where: { nationalId: nc.nationalId }, select: { id: true } });
+    if (exists) throw new Error("לקוח עם תעודת זהות זו כבר קיים במערכת");
+    const created = await prisma.client.create({
+      data: {
+        fullName: nc.fullName,
+        nationalId: nc.nationalId,
+        dateOfBirth: new Date(nc.dateOfBirth),
+        gender: nc.gender as Gender,
+        phone: nc.phone,
+        email: nc.email || null,
+        addressCity: nc.addressCity || null,
+        employmentStatus: (nc.employmentStatus ?? "UNEMPLOYED") as EmploymentStatus,
+        primaryCondition: nc.primaryCondition || null,
+      },
+      select: { id: true },
+    });
+    clientId = created.id;
+  }
+
+  const caseNumber = await nextCaseNumber();
+  const templates = await prisma.documentChecklistTemplate.findMany({
+    where: { caseType: data.caseType as CaseType },
+    select: { id: true },
+  });
+
+  const created = await prisma.case.create({
+    data: {
+      caseNumber,
+      clientId,
+      createdById: userId,
+      assignedAgentId: data.assignedAgentId || null,
+      caseType: data.caseType as CaseType,
+      priority: data.priority as Priority,
+      status: "NEW_INTAKE",
+      claimedPercentage: data.claimedPercentage ?? null,
+      claimDescription: data.claimDescription || null,
+      submissionDeadline: data.submissionDeadline ? new Date(data.submissionDeadline) : null,
+      hasMissingDocuments: templates.length > 0,
+      statusHistory: {
+        create: { changedById: userId, previousStatus: null, newStatus: "NEW_INTAKE" },
+      },
+      ...(templates.length > 0
+        ? { checklist: { create: templates.map((t) => ({ templateId: t.id, status: "MISSING" as const })) } }
+        : {}),
+    },
+    select: { id: true },
+  });
+
+  revalidatePath("/cases");
+  revalidatePath("/dashboard");
+  revalidatePath("/clients");
+  return { id: created.id };
 }
 
 // ─── Case status ───────────────────────────────────────────────────────────────
