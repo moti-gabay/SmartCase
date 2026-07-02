@@ -222,6 +222,36 @@ export interface CaseDetail {
   statusHistory: StatusHistoryEntry[];
 }
 
+// ─── Client Detail (profile + edit) ─────────────────────────────────────────────
+
+export interface ClientDetail {
+  id: string;
+  fullName: string;
+  nationalId: string;
+  dateOfBirth: string;
+  gender: Gender;
+  phone: string;
+  email?: string | null;
+  addressStreet?: string | null;
+  addressCity?: string | null;
+  addressZip?: string | null;
+  employmentStatus: EmploymentStatus;
+  employer?: string | null;
+  monthlyIncome?: number | null;
+  spouseIncome?: number | null;
+  spouseName?: string | null;
+  spouseNationalId?: string | null;
+  primaryCondition?: string | null;
+  icdCode?: string | null;
+  recognizedPercentage?: number | null;
+  diagnosisDate?: string | null;
+  treatingPhysician?: string | null;
+  isActive: boolean;
+  internalNotes?: string | null;
+  createdAt: string;
+  cases: CaseSummary[];
+}
+
 // ─── Client List ───────────────────────────────────────────────────────────────
 
 export interface ClientListItem {

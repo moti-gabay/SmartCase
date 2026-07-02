@@ -1,11 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
 import { cn } from "@/lib/utils";
 import { StatusBadge, PriorityBadge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { deleteCase } from "@/lib/actions";
 import { CASE_STATUS_LABELS, CASE_TYPE_LABELS, PIPELINE_COLUMNS } from "@/lib/constants";
 import type { CaseDetail, CaseStatus } from "@/types";
 import {
@@ -17,6 +20,9 @@ import {
   Calendar,
   CheckCircle2,
   FileWarning,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 interface CaseHeaderProps {
@@ -26,10 +32,25 @@ interface CaseHeaderProps {
 }
 
 export function CaseHeader({ caseDetail, checklistProgress, onStatusChange }: CaseHeaderProps) {
+  const router = useRouter();
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
   const progressPct = checklistProgress.total > 0
     ? Math.round((checklistProgress.approved / checklistProgress.total) * 100)
     : 0;
+
+  const handleDelete = () => {
+    startTransition(async () => {
+      try {
+        await deleteCase(caseDetail.id);
+        router.push("/cases");
+      } catch {
+        setConfirmOpen(false);
+      }
+    });
+  };
 
   return (
     <div className="border-b border-slate-200 bg-white">
@@ -126,8 +147,57 @@ export function CaseHeader({ caseDetail, checklistProgress, onStatusChange }: Ca
             <Sparkles className="h-4 w-4" />
             יצירת מכתב
           </Button>
+
+          {/* Edit / delete menu */}
+          <div className="relative">
+            <button
+              onClick={() => setActionsOpen((v) => !v)}
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:bg-slate-50 transition-colors"
+              aria-label="פעולות נוספות"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+            {actionsOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setActionsOpen(false)} />
+                <div className="absolute end-0 top-full z-20 mt-1.5 w-40 rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                  <Link
+                    href={`/cases/${caseDetail.id}/edit`}
+                    className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                    onClick={() => setActionsOpen(false)}
+                  >
+                    <Pencil className="h-4 w-4 text-slate-400" />
+                    עריכת תיק
+                  </Link>
+                  <button
+                    onClick={() => { setActionsOpen(false); setConfirmOpen(true); }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    מחיקת תיק
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        danger
+        title="מחיקת תיק"
+        confirmLabel="מחק תיק"
+        pending={pending}
+        message={
+          <>
+            האם למחוק את תיק <span className="font-semibold">{caseDetail.caseNumber}</span> לצמיתות?
+            <span className="mt-2 block text-red-600">כל המסמכים, המשימות וההערות של התיק יימחקו.</span>
+          </>
+        }
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmOpen(false)}
+      />
 
       {/* Progress bar */}
       <div className="flex items-center gap-4 border-t border-slate-100 px-6 py-3">

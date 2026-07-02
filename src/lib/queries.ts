@@ -241,6 +241,42 @@ export async function getClientList(): Promise<ClientListItem[]> {
   });
 }
 
+export async function getClientDetail(id: string): Promise<import("@/types").ClientDetail | null> {
+  const c = await prisma.client.findUnique({
+    where: { id },
+    include: { cases: { select: caseSummarySelect, orderBy: { updatedAt: "desc" } } },
+  });
+  if (!c) return null;
+
+  return {
+    id: c.id,
+    fullName: c.fullName,
+    nationalId: c.nationalId,
+    dateOfBirth: c.dateOfBirth.toISOString(),
+    gender: c.gender,
+    phone: c.phone,
+    email: c.email,
+    addressStreet: c.addressStreet,
+    addressCity: c.addressCity,
+    addressZip: c.addressZip,
+    employmentStatus: c.employmentStatus,
+    employer: c.employer,
+    monthlyIncome: num(c.monthlyIncome) ?? null,
+    spouseIncome: num(c.spouseIncome) ?? null,
+    spouseName: c.spouseName,
+    spouseNationalId: c.spouseNationalId,
+    primaryCondition: c.primaryCondition,
+    icdCode: c.icdCode,
+    recognizedPercentage: c.recognizedPercentage,
+    diagnosisDate: iso(c.diagnosisDate),
+    treatingPhysician: c.treatingPhysician,
+    isActive: c.isActive,
+    internalNotes: c.internalNotes,
+    createdAt: c.createdAt.toISOString(),
+    cases: c.cases.map(toCaseSummary),
+  };
+}
+
 export async function getClientCities(): Promise<string[]> {
   const rows = await prisma.client.findMany({
     where: { addressCity: { not: null } },

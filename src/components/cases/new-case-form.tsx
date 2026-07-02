@@ -25,18 +25,23 @@ const labelCls = "mb-1 block text-xs font-medium text-slate-600";
 export function NewCaseForm({
   clients,
   agents,
+  initialClientId,
 }: {
   clients: ClientOption[];
   agents: UserSummary[];
+  initialClientId?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const preselected = initialClientId && clients.some((c) => c.id === initialClientId)
+    ? initialClientId
+    : undefined;
   const [clientMode, setClientMode] = useState<"existing" | "new">(
     clients.length > 0 ? "existing" : "new"
   );
 
-  const [existingClientId, setExistingClientId] = useState(clients[0]?.id ?? "");
+  const [existingClientId, setExistingClientId] = useState(preselected ?? clients[0]?.id ?? "");
   const [newClient, setNewClient] = useState({
     fullName: "", nationalId: "", dateOfBirth: "", gender: "MALE" as Gender,
     phone: "", email: "", addressCity: "",

@@ -6,7 +6,7 @@ import type { ClientListItem, SortField, ClientSort } from "@/types";
 import {
   ChevronsUpDown, ChevronUp, ChevronDown,
   Phone, Mail, AlertTriangle, FolderOpen,
-  Plus, MoreHorizontal,
+  Plus, Pencil,
 } from "lucide-react";
 
 // ─── Sort header cell ─────────────────────────────────────────────────────────
@@ -249,12 +249,13 @@ function TableRow({ client, striped }: { client: ClientListItem; striped: boolea
           >
             <Plus className="h-3.5 w-3.5" />
           </Link>
-          <button
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:bg-slate-50 shadow-sm transition-all"
-            aria-label="אפשרויות נוספות"
+          <Link
+            href={`/clients/${client.id}/edit`}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:border-indigo-300 hover:text-indigo-600 shadow-sm transition-all"
+            aria-label="עריכת לקוח"
           >
-            <MoreHorizontal className="h-4 w-4" />
-          </button>
+            <Pencil className="h-3.5 w-3.5" />
+          </Link>
         </div>
       </td>
     </tr>

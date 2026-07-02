@@ -193,6 +193,137 @@ export async function createCase(input: CreateCaseInput): Promise<{ id: string }
   return { id: created.id };
 }
 
+// ─── Update / delete client ─────────────────────────────────────────────────
+
+const updateClientSchema = z.object({
+  fullName: z.string().min(2),
+  nationalId: z.string().min(5),
+  dateOfBirth: z.string().min(4),
+  gender: z.enum(["MALE", "FEMALE", "OTHER"]),
+  phone: z.string().min(3),
+  email: z.string().email().optional().or(z.literal("")),
+  addressStreet: z.string().optional(),
+  addressCity: z.string().optional(),
+  addressZip: z.string().optional(),
+  employmentStatus: z.enum(["EMPLOYED", "SELF_EMPLOYED", "UNEMPLOYED", "RETIRED", "STUDENT", "UNABLE_TO_WORK"]),
+  employer: z.string().optional(),
+  monthlyIncome: z.number().nonnegative().optional(),
+  spouseIncome: z.number().nonnegative().optional(),
+  spouseName: z.string().optional(),
+  primaryCondition: z.string().optional(),
+  icdCode: z.string().optional(),
+  recognizedPercentage: z.number().int().min(0).max(100).optional(),
+  diagnosisDate: z.string().optional(),
+  treatingPhysician: z.string().optional(),
+  internalNotes: z.string().optional(),
+  isActive: z.boolean().optional(),
+});
+
+export type UpdateClientInput = z.infer<typeof updateClientSchema>;
+
+export async function updateClient(id: string, input: UpdateClientInput) {
+  await requireUserId();
+  const data = updateClientSchema.parse(input);
+
+  const conflict = await prisma.client.findFirst({
+    where: { nationalId: data.nationalId, id: { not: id } },
+    select: { id: true },
+  });
+  if (conflict) throw new Error("לקוח אחר עם תעודת זהות זו כבר קיים במערכת");
+
+  await prisma.client.update({
+    where: { id },
+    data: {
+      fullName: data.fullName,
+      nationalId: data.nationalId,
+      dateOfBirth: new Date(data.dateOfBirth),
+      gender: data.gender as Gender,
+      phone: data.phone,
+      email: data.email || null,
+      addressStreet: data.addressStreet || null,
+      addressCity: data.addressCity || null,
+      addressZip: data.addressZip || null,
+      employmentStatus: data.employmentStatus as EmploymentStatus,
+      employer: data.employer || null,
+      monthlyIncome: data.monthlyIncome ?? null,
+      spouseIncome: data.spouseIncome ?? null,
+      spouseName: data.spouseName || null,
+      primaryCondition: data.primaryCondition || null,
+      icdCode: data.icdCode || null,
+      recognizedPercentage: data.recognizedPercentage ?? null,
+      diagnosisDate: data.diagnosisDate ? new Date(data.diagnosisDate) : null,
+      treatingPhysician: data.treatingPhysician || null,
+      internalNotes: data.internalNotes || null,
+      ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+    },
+  });
+
+  revalidatePath("/clients");
+  revalidatePath(`/clients/${id}`);
+}
+
+export async function deleteClient(id: string) {
+  await requireUserId();
+  // The Client→Case relation has no DB cascade, so remove the client's cases
+  // first (their children cascade), then the client itself.
+  await prisma.$transaction([
+    prisma.case.deleteMany({ where: { clientId: id } }),
+    prisma.client.delete({ where: { id } }),
+  ]);
+
+  revalidatePath("/clients");
+  revalidatePath("/cases");
+  revalidatePath("/dashboard");
+}
+
+// ─── Update / delete case ─────────────────────────────────────────────────────
+
+const updateCaseSchema = z.object({
+  caseType: z.enum(CASE_TYPES),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]),
+  claimedPercentage: z.number().int().min(0).max(100).optional(),
+  claimDescription: z.string().optional(),
+  authorityReferenceNumber: z.string().optional(),
+  submissionDeadline: z.string().optional(),
+  nextFollowUpDate: z.string().optional(),
+  assignedAgentId: z.string().optional(),
+});
+
+export type UpdateCaseInput = z.infer<typeof updateCaseSchema>;
+
+export async function updateCase(id: string, input: UpdateCaseInput) {
+  await requireUserId();
+  const data = updateCaseSchema.parse(input);
+
+  await prisma.case.update({
+    where: { id },
+    data: {
+      caseType: data.caseType as CaseType,
+      priority: data.priority as Priority,
+      claimedPercentage: data.claimedPercentage ?? null,
+      claimDescription: data.claimDescription || null,
+      authorityReferenceNumber: data.authorityReferenceNumber || null,
+      submissionDeadline: data.submissionDeadline ? new Date(data.submissionDeadline) : null,
+      nextFollowUpDate: data.nextFollowUpDate ? new Date(data.nextFollowUpDate) : null,
+      assignedAgentId: data.assignedAgentId || null,
+    },
+  });
+
+  revalidatePath(`/cases/${id}`);
+  revalidatePath("/cases");
+  revalidatePath("/dashboard");
+}
+
+export async function deleteCase(id: string) {
+  await requireUserId();
+  // Case children (documents, notes, tasks, status history, checklist) cascade.
+  await prisma.case.delete({ where: { id } });
+
+  revalidatePath("/cases");
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+}
+
 // ─── Case status ───────────────────────────────────────────────────────────────
 
 export async function changeCaseStatus(caseId: string, newStatus: CaseStatus, reason?: string) {
