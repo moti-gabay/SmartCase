@@ -54,6 +54,7 @@ enum Priority {
 
 enum DocumentStatus {
   MISSING
+  PENDING_UPLOAD
   UPLOADED_PENDING_REVIEW
   APPROVED
   REJECTED

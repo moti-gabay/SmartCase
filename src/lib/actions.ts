@@ -4,7 +4,17 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/../auth";
+import { deleteObject } from "@/core/storage/s3-storage";
 import type { CaseStatus, CaseType, Priority, TaskStatus, Gender, EmploymentStatus } from "@/types";
+
+// Best-effort removal of S3 objects; never let a storage error break the DB action.
+async function deleteObjectsQuiet(keys: (string | null | undefined)[]): Promise<void> {
+  await Promise.all(
+    keys
+      .filter((k): k is string => !!k)
+      .map((k) => deleteObject(k).catch((e) => console.error("[s3 delete]", k, e)))
+  );
+}
 
 async function requireUserId(): Promise<string> {
   const session = await auth();
@@ -264,12 +274,15 @@ export async function updateClient(id: string, input: UpdateClientInput) {
 
 export async function deleteClient(id: string) {
   await requireUserId();
+  // Collect S3 keys before the rows are gone (cascade removes Document rows).
+  const docs = await prisma.document.findMany({ where: { case: { clientId: id } }, select: { storageKey: true } });
   // The Client→Case relation has no DB cascade, so remove the client's cases
   // first (their children cascade), then the client itself.
   await prisma.$transaction([
     prisma.case.deleteMany({ where: { clientId: id } }),
     prisma.client.delete({ where: { id } }),
   ]);
+  await deleteObjectsQuiet(docs.map((d) => d.storageKey));
 
   revalidatePath("/clients");
   revalidatePath("/cases");
@@ -316,8 +329,11 @@ export async function updateCase(id: string, input: UpdateCaseInput) {
 
 export async function deleteCase(id: string) {
   await requireUserId();
+  // Collect S3 keys before the cascade removes the Document rows.
+  const docs = await prisma.document.findMany({ where: { caseId: id }, select: { storageKey: true } });
   // Case children (documents, notes, tasks, status history, checklist) cascade.
   await prisma.case.delete({ where: { id } });
+  await deleteObjectsQuiet(docs.map((d) => d.storageKey));
 
   revalidatePath("/cases");
   revalidatePath("/clients");
@@ -328,7 +344,7 @@ export async function deleteCase(id: string) {
 
 export async function deleteDocument(id: string) {
   await requireUserId();
-  const doc = await prisma.document.findUnique({ where: { id }, select: { caseId: true } });
+  const doc = await prisma.document.findUnique({ where: { id }, select: { caseId: true, storageKey: true } });
   if (!doc) throw new Error("המסמך לא נמצא");
 
   // Reset any checklist item that pointed at this document back to MISSING.
@@ -337,6 +353,7 @@ export async function deleteDocument(id: string) {
     data: { status: "MISSING", documentId: null },
   });
   await prisma.document.delete({ where: { id } });
+  await deleteObjectsQuiet([doc.storageKey]);
 
   const stillMissing = await prisma.caseChecklist.count({
     where: { caseId: doc.caseId, status: { in: ["MISSING", "REJECTED"] } },

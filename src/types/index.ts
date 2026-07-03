@@ -30,7 +30,7 @@ export type CaseType =
 
 export type Priority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 
-export type DocumentStatus = "MISSING" | "UPLOADED_PENDING_REVIEW" | "APPROVED" | "REJECTED" | "EXPIRED";
+export type DocumentStatus = "MISSING" | "PENDING_UPLOAD" | "UPLOADED_PENDING_REVIEW" | "APPROVED" | "REJECTED" | "EXPIRED";
 export type DocumentType =
   | "NATIONAL_ID" | "MEDICAL_REPORT" | "PSYCHIATRIC_EVALUATION"
   | "SALARY_SLIP" | "EMPLOYER_CONFIRMATION" | "BANK_STATEMENT"

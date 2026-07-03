@@ -64,6 +64,7 @@ interface DocStatusBadgeProps {
 
 const DOC_STATUS_STYLES: Record<DocumentStatus, string> = {
   MISSING:                 "bg-red-50 text-red-600 border-red-200",
+  PENDING_UPLOAD:          "bg-slate-100 text-slate-500 border-slate-200",
   UPLOADED_PENDING_REVIEW: "bg-amber-50 text-amber-600 border-amber-200",
   APPROVED:                "bg-emerald-50 text-emerald-600 border-emerald-200",
   REJECTED:                "bg-red-50 text-red-700 border-red-200",

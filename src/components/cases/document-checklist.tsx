@@ -50,6 +50,7 @@ function StatusIcon({ status }: { status: DocumentStatus }) {
     case "REJECTED":                return <XCircle      {...props} className={cn(props.className, "text-red-500")} />;
     case "UPLOADED_PENDING_REVIEW": return <Clock        {...props} className={cn(props.className, "text-amber-500")} />;
     case "EXPIRED":                 return <RefreshCw    {...props} className={cn(props.className, "text-slate-400")} />;
+    case "PENDING_UPLOAD":          return <Clock        {...props} className={cn(props.className, "text-slate-400")} />;
     case "MISSING":                 return <AlertTriangle {...props} className={cn(props.className, "text-red-400")} />;
   }
 }
@@ -58,6 +59,7 @@ function StatusIcon({ status }: { status: DocumentStatus }) {
 
 const ROW_STYLE: Record<DocumentStatus, string> = {
   MISSING:                 "border-red-100 bg-red-50/40",
+  PENDING_UPLOAD:          "border-slate-100 bg-slate-50/40",
   UPLOADED_PENDING_REVIEW: "border-amber-100 bg-amber-50/30",
   APPROVED:                "border-emerald-100 bg-emerald-50/20",
   REJECTED:                "border-red-200 bg-red-50/60",
@@ -317,21 +319,57 @@ export function DocumentChecklist({ items, caseId, documents }: DocumentChecklis
     e.target.value = "";
     if (!file || !payload) return;
 
+    // Client-side pre-checks (S3 enforces these too via the presigned policy).
+    const ALLOWED = ["application/pdf", "image/png", "image/jpeg", "image/jpg"];
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError("הקובץ גדול מדי (מקסימום 10MB)");
+      pendingUpload.current = null;
+      return;
+    }
+    if (!ALLOWED.includes(file.type)) {
+      setUploadError("סוג קובץ לא נתמך (PDF, JPG או PNG בלבד)");
+      pendingUpload.current = null;
+      return;
+    }
+
     setUploadingId(payload.checklistItemId ?? "general");
     setUploadError(null);
     try {
-      const fd = new FormData();
-      fd.append("caseId", caseId);
-      fd.append("documentType", payload.documentType);
-      fd.append("displayName", payload.displayName);
-      if (payload.checklistItemId) fd.append("checklistItemId", payload.checklistItemId);
-      fd.append("file", file);
-
-      const res = await fetch("/api/documents", { method: "POST", body: fd });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? "העלאת המסמך נכשלה");
+      // 1) Ask the server for a presigned POST + a placeholder Document row.
+      const presignRes = await fetch("/api/documents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caseId,
+          documentType: payload.documentType,
+          displayName: payload.displayName,
+          fileName: file.name,
+          fileSize: file.size,
+          mimeType: file.type,
+          checklistItemId: payload.checklistItemId,
+        }),
+      });
+      if (!presignRes.ok) {
+        const data = await presignRes.json().catch(() => ({}));
+        throw new Error(data.error ?? "יצירת ההעלאה נכשלה");
       }
+      const { documentId, upload } = await presignRes.json();
+
+      // 2) Upload the bytes straight to S3 (no auth header; "file" must be last).
+      const form = new FormData();
+      Object.entries(upload.fields as Record<string, string>).forEach(([k, v]) => form.append(k, v));
+      form.append("file", file);
+      const s3res = await fetch(upload.url, { method: "POST", body: form });
+      if (!s3res.ok) throw new Error("העלאת הקובץ ל-S3 נכשלה");
+
+      // 3) Confirm — promote the row and link the checklist item.
+      const confirmRes = await fetch(`/api/documents/${documentId}/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ checklistItemId: payload.checklistItemId ?? null }),
+      });
+      if (!confirmRes.ok) throw new Error("אישור ההעלאה נכשל");
+
       startTransition(() => router.refresh());
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "העלאת המסמך נכשלה");

@@ -296,10 +296,15 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
       client: true,
       assignedAgent: { select: { id: true, name: true, email: true } },
       checklist: {
-        include: { template: true, document: { include: { uploadedBy: { select: { name: true } } } } },
+        include: {
+          template: true,
+          document: { omit: { fileData: true }, include: { uploadedBy: { select: { name: true } } } },
+        },
         orderBy: { template: { sortOrder: "asc" } },
       },
       documents: {
+        where: { status: { not: "PENDING_UPLOAD" } },
+        omit: { fileData: true },
         include: { uploadedBy: { select: { name: true } } },
         orderBy: { createdAt: "desc" },
       },
@@ -511,6 +516,8 @@ export interface DocumentListItem {
 
 export async function getDocuments(): Promise<DocumentListItem[]> {
   const rows = await prisma.document.findMany({
+    where: { status: { not: "PENDING_UPLOAD" } },
+    omit: { fileData: true },
     orderBy: { createdAt: "desc" },
     include: {
       uploadedBy: { select: { name: true } },

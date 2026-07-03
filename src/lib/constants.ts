@@ -75,6 +75,7 @@ export const PRIORITY_BG: Record<string, string> = {
 
 export const DOCUMENT_STATUS_LABELS: Record<string, string> = {
   MISSING:                "חסר",
+  PENDING_UPLOAD:         "בהעלאה",
   UPLOADED_PENDING_REVIEW: "הועלה – ממתין לבדיקה",
   APPROVED:               "אושר",
   REJECTED:               "נדחה",
