@@ -299,6 +299,10 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
         include: { template: true, document: { include: { uploadedBy: { select: { name: true } } } } },
         orderBy: { template: { sortOrder: "asc" } },
       },
+      documents: {
+        include: { uploadedBy: { select: { name: true } } },
+        orderBy: { createdAt: "desc" },
+      },
       notes: { include: { author: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
       tasks: { include: { assignedTo: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
       statusHistory: { include: { changedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
@@ -378,6 +382,19 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
             createdAt: item.document.createdAt.toISOString(),
           }
         : undefined,
+    })),
+
+    documents: c.documents.map((d) => ({
+      id: d.id,
+      documentType: d.documentType,
+      displayName: d.displayName,
+      fileName: d.fileName,
+      fileSize: d.fileSize,
+      mimeType: d.mimeType,
+      status: d.status,
+      isAiReviewed: d.isAiReviewed,
+      uploadedByName: d.uploadedBy?.name ?? null,
+      createdAt: d.createdAt.toISOString(),
     })),
 
     notes: c.notes.map((n) => ({

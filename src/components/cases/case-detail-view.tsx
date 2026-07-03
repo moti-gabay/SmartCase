@@ -108,7 +108,7 @@ export function CaseDetailView({ caseDetail }: { caseDetail: CaseDetail }) {
                     </span>
                   </div>
                 )}
-                <DocumentChecklist items={caseData.checklist} caseId={caseData.id} />
+                <DocumentChecklist items={caseData.checklist} caseId={caseData.id} documents={caseData.documents} />
               </>
             )}
 

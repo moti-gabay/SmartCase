@@ -1,17 +1,21 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { cn, formatDate } from "@/lib/utils";
 import { DocStatusBadge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { deleteDocument } from "@/lib/actions";
 import { DOCUMENT_TYPE_LABELS } from "@/lib/constants";
-import type { ChecklistItemDetail, DocumentStatus } from "@/types";
+import type { ChecklistItemDetail, CaseDocument, DocumentStatus } from "@/types";
 import {
   CheckCircle2, XCircle, Clock, AlertTriangle, RefreshCw,
   Upload, Eye, Sparkles, ChevronDown, ChevronUp,
   FileText, CreditCard, Stethoscope, Banknote, Building2,
   Camera, Award, FileBadge, ShieldCheck, Info,
+  Download, Trash2, Plus, X, Loader2,
 } from "lucide-react";
 
 // ─── Icon per document type ───────────────────────────────────────────────────
@@ -111,7 +115,7 @@ function ChecklistRow({
   isUploading,
 }: {
   item: ChecklistItemDetail;
-  onUploadClick: (id: string) => void;
+  onUploadClick: (item: ChecklistItemDetail) => void;
   isUploading: boolean;
 }) {
   const [expanded, setExpanded] = useState(
@@ -185,28 +189,21 @@ function ChecklistRow({
             <Button
               size="sm"
               variant={item.status === "MISSING" ? "primary" : "outline"}
-              onClick={() => onUploadClick(item.id)}
+              onClick={() => onUploadClick(item)}
               disabled={isUploading}
               className="gap-1.5 text-xs"
             >
-              <Upload className="h-3.5 w-3.5" />
+              {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
               {isUploading ? "מעלה..." : item.status === "MISSING" ? "העלה" : "העלה שוב"}
             </Button>
           )}
-          {item.status === "UPLOADED_PENDING_REVIEW" && (
-            <>
-              <Button size="sm" variant="ghost" className="text-xs gap-1">
-                <Eye className="h-3.5 w-3.5" />
-                צפה
-              </Button>
-              <Button size="sm" variant="secondary" className="text-xs gap-1">
-                <Sparkles className="h-3.5 w-3.5" />
-                AI
-              </Button>
-            </>
-          )}
-          {item.status === "APPROVED" && (
-            <Button size="sm" variant="ghost" className="text-xs gap-1">
+          {(item.status === "UPLOADED_PENDING_REVIEW" || item.status === "APPROVED") && doc && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-xs gap-1"
+              onClick={() => window.open(`/api/documents/${doc.id}`, "_blank")}
+            >
               <Eye className="h-3.5 w-3.5" />
               צפה
             </Button>
@@ -255,14 +252,24 @@ const FILTER_LABELS: Record<FilterKey, string> = {
 interface DocumentChecklistProps {
   items: ChecklistItemDetail[];
   caseId: string;
+  documents: CaseDocument[];
 }
 
-export function DocumentChecklist({ items, caseId: _caseId }: DocumentChecklistProps) {
+type PendingUpload = { documentType: string; displayName: string; checklistItemId?: string };
+
+export function DocumentChecklist({ items, caseId, documents }: DocumentChecklistProps) {
+  const router = useRouter();
+  const [, startTransition] = useTransition();
   const [filter, setFilter] = useState<FilterKey>("all");
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [showOptional, setShowOptional] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [genOpen, setGenOpen] = useState(false);
+  const [genType, setGenType] = useState<string>("MEDICAL_REPORT");
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deletePending, startDelete] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const pendingItemId = useRef<string | null>(null);
+  const pendingUpload = useRef<PendingUpload | null>(null);
 
   // ── Stats ──────────────────────────────────────────────────────────────────
   const approved  = items.filter((i) => i.status === "APPROVED");
@@ -288,21 +295,63 @@ export function DocumentChecklist({ items, caseId: _caseId }: DocumentChecklistP
     .filter(FILTER_FN[filter])
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
-  // ── Upload stub ─────────────────────────────────────────────────────────────
-  const handleUploadClick = (itemId: string) => {
-    pendingItemId.current = itemId;
+  // ── Upload ──────────────────────────────────────────────────────────────────
+  const triggerUpload = (payload: PendingUpload) => {
+    setUploadError(null);
+    pendingUpload.current = payload;
     fileInputRef.current?.click();
+  };
+
+  const handleUploadClick = (item: ChecklistItemDetail) => {
+    triggerUpload({ documentType: item.documentType, displayName: item.displayName, checklistItemId: item.id });
+  };
+
+  const handleGeneralUpload = () => {
+    setGenOpen(false);
+    triggerUpload({ documentType: genType, displayName: DOCUMENT_TYPE_LABELS[genType] ?? genType });
   };
 
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !pendingItemId.current) return;
-    setUploadingId(pendingItemId.current);
-    // TODO: POST to /api/documents with FormData
-    await new Promise((r) => setTimeout(r, 1500));
-    setUploadingId(null);
-    pendingItemId.current = null;
+    const payload = pendingUpload.current;
     e.target.value = "";
+    if (!file || !payload) return;
+
+    setUploadingId(payload.checklistItemId ?? "general");
+    setUploadError(null);
+    try {
+      const fd = new FormData();
+      fd.append("caseId", caseId);
+      fd.append("documentType", payload.documentType);
+      fd.append("displayName", payload.displayName);
+      if (payload.checklistItemId) fd.append("checklistItemId", payload.checklistItemId);
+      fd.append("file", file);
+
+      const res = await fetch("/api/documents", { method: "POST", body: fd });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "העלאת המסמך נכשלה");
+      }
+      startTransition(() => router.refresh());
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "העלאת המסמך נכשלה");
+    } finally {
+      setUploadingId(null);
+      pendingUpload.current = null;
+    }
+  };
+
+  const handleDeleteDocument = () => {
+    if (!deleteId) return;
+    startDelete(async () => {
+      try {
+        await deleteDocument(deleteId);
+        setDeleteId(null);
+        router.refresh();
+      } catch {
+        setDeleteId(null);
+      }
+    });
   };
 
   return (
@@ -338,6 +387,65 @@ export function DocumentChecklist({ items, caseId: _caseId }: DocumentChecklistP
             </span>
           ))}
         </div>
+      </div>
+
+      {uploadError && (
+        <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
+          <AlertTriangle className="h-4 w-4 shrink-0" /> {uploadError}
+        </div>
+      )}
+
+      {/* Uploaded documents + general upload */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-1 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">מסמכים שהועלו ({documents.length})</h3>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => { setUploadError(null); setGenOpen(true); }}
+            disabled={uploadingId === "general"}
+          >
+            {uploadingId === "general" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+            העלה מסמך
+          </Button>
+        </div>
+        {documents.length > 0 ? (
+          <div className="flex flex-col divide-y divide-slate-100">
+            {documents.map((d) => (
+              <div key={d.id} className="flex items-center gap-3 py-2.5">
+                <FileText className="h-4 w-4 shrink-0 text-slate-400" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-slate-800">{d.displayName}</p>
+                  <p className="truncate text-[11px] text-slate-400">
+                    {DOCUMENT_TYPE_LABELS[d.documentType] ?? d.documentType}
+                    {d.fileName ? ` · ${d.fileName}` : ""}
+                    {d.fileSize ? ` · ${fmtSize(d.fileSize)}` : ""}
+                  </p>
+                </div>
+                <DocStatusBadge status={d.status} />
+                <button
+                  onClick={() => window.open(`/api/documents/${d.id}`, "_blank")}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-indigo-600 transition-colors"
+                  aria-label="צפה / הורד"
+                >
+                  <Download className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setDeleteId(d.id)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                  aria-label="מחק מסמך"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="py-3 text-center text-xs text-slate-400">
+            עדיין לא הועלו מסמכים לתיק. לחץ &quot;העלה מסמך&quot; כדי להתחיל.
+          </p>
+        )}
       </div>
 
       {/* Filter tabs */}
@@ -416,13 +524,55 @@ export function DocumentChecklist({ items, caseId: _caseId }: DocumentChecklistP
         </section>
       )}
 
-      {/* Empty state */}
-      {visibleItems.length === 0 && (
+      {/* Empty state (checklist filter) */}
+      {items.length > 0 && visibleItems.length === 0 && (
         <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-200 py-10 text-center">
           <CheckCircle2 className="h-8 w-8 text-emerald-400" />
           <p className="text-sm font-medium text-slate-600">אין פריטים בסינון זה</p>
         </div>
       )}
+
+      {/* General upload type picker */}
+      {genOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => setGenOpen(false)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-slate-900">העלאת מסמך</h2>
+              <button onClick={() => setGenOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100" aria-label="סגור">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">סוג מסמך</label>
+            <select
+              value={genType}
+              onChange={(e) => setGenType(e.target.value)}
+              className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+            >
+              {Object.keys(DOCUMENT_TYPE_LABELS).map((t) => (
+                <option key={t} value={t}>{DOCUMENT_TYPE_LABELS[t]}</option>
+              ))}
+            </select>
+            <p className="mt-2 text-[11px] text-slate-400">PDF, JPG או PNG · עד 10MB</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setGenOpen(false)}>ביטול</Button>
+              <Button size="sm" className="gap-1.5" onClick={handleGeneralUpload}>
+                <Upload className="h-3.5 w-3.5" /> בחר קובץ
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={deleteId !== null}
+        danger
+        title="מחיקת מסמך"
+        confirmLabel="מחק מסמך"
+        pending={deletePending}
+        message="האם למחוק את המסמך? פעולה זו בלתי הפיכה."
+        onConfirm={handleDeleteDocument}
+        onCancel={() => setDeleteId(null)}
+      />
     </div>
   );
 }

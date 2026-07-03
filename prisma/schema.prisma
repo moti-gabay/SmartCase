@@ -246,6 +246,7 @@ model Document {
   fileName     String?
   fileSize     Int?
   mimeType     String?
+  fileData     Bytes?
   status       DocumentStatus @default(MISSING)
   expiryDate   DateTime?
   issueDate    DateTime?

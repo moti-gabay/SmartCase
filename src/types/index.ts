@@ -128,6 +128,19 @@ export interface UploadedDocument {
   createdAt: string;
 }
 
+export interface CaseDocument {
+  id: string;
+  documentType: DocumentType;
+  displayName: string;
+  fileName?: string | null;
+  fileSize?: number | null;
+  mimeType?: string | null;
+  status: DocumentStatus;
+  isAiReviewed: boolean;
+  uploadedByName?: string | null;
+  createdAt: string;
+}
+
 export interface ChecklistItemDetail {
   id: string;
   documentType: DocumentType;
@@ -217,6 +230,7 @@ export interface CaseDetail {
   assignedAgent?: { id: string; name: string; email: string };
 
   checklist: ChecklistItemDetail[];
+  documents: CaseDocument[];
   notes: NoteDetail[];
   tasks: TaskDetail[];
   statusHistory: StatusHistoryEntry[];

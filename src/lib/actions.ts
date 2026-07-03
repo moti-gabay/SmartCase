@@ -324,6 +324,29 @@ export async function deleteCase(id: string) {
   revalidatePath("/dashboard");
 }
 
+// ─── Delete document ───────────────────────────────────────────────────────────
+
+export async function deleteDocument(id: string) {
+  await requireUserId();
+  const doc = await prisma.document.findUnique({ where: { id }, select: { caseId: true } });
+  if (!doc) throw new Error("המסמך לא נמצא");
+
+  // Reset any checklist item that pointed at this document back to MISSING.
+  await prisma.caseChecklist.updateMany({
+    where: { documentId: id },
+    data: { status: "MISSING", documentId: null },
+  });
+  await prisma.document.delete({ where: { id } });
+
+  const stillMissing = await prisma.caseChecklist.count({
+    where: { caseId: doc.caseId, status: { in: ["MISSING", "REJECTED"] } },
+  });
+  await prisma.case.update({ where: { id: doc.caseId }, data: { hasMissingDocuments: stillMissing > 0 } });
+
+  revalidatePath(`/cases/${doc.caseId}`);
+  revalidatePath("/documents");
+}
+
 // ─── Case status ───────────────────────────────────────────────────────────────
 
 export async function changeCaseStatus(caseId: string, newStatus: CaseStatus, reason?: string) {
