@@ -112,6 +112,16 @@ enum EmploymentStatus {
   UNABLE_TO_WORK
 }
 
+enum LetterType {
+  CLAIM_REQUEST
+  APPEAL
+  SEVERITY_INCREASE
+  MEDICAL_COMMITTEE
+  AUTHORITY_INQUIRY
+  COVER_LETTER
+  OTHER
+}
+
 // ─── User (Agents / Supervisors / Admins) ─────────────────────────────────────
 
 model User {
@@ -135,6 +145,7 @@ model User {
   uploadedDocs   Document[]          @relation("DocumentUploader")
   reviewedDocs   Document[]          @relation("DocumentReviewer")
   auditLogs      AuditLog[]
+  generatedLetters GeneratedLetter[] @relation("LetterAuthor")
 
   @@map("users")
 }
@@ -207,6 +218,7 @@ model Case {
   tasks         Task[]
   statusHistory CaseStatusHistory[]
   checklist     CaseChecklist[]
+  letters       GeneratedLetter[]
 
   @@index([clientId])
   @@index([assignedAgentId])
@@ -367,4 +379,23 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([userId])
   @@map("audit_logs")
+}
+
+// ─── Generated Letter (AI drafts) ───────────────────────────────────────────────
+
+model GeneratedLetter {
+  id          String     @id @default(cuid())
+  caseId      String
+  createdById String?
+  letterType  LetterType
+  title       String
+  content     String     @db.Text
+  context     String?    @db.Text
+  createdAt   DateTime   @default(now())
+
+  case      Case  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("LetterAuthor", fields: [createdById], references: [id])
+
+  @@index([caseId])
+  @@map("generated_letters")
 }

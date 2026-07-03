@@ -7,6 +7,7 @@ import { DocumentChecklist } from "@/components/cases/document-checklist";
 import { ActivityTimeline } from "@/components/cases/activity-timeline";
 import { TasksPanel } from "@/components/cases/tasks-panel";
 import { changeCaseStatus } from "@/lib/actions";
+import { LetterGenerator } from "@/components/ai/letter-generator";
 import { cn } from "@/lib/utils";
 import type { CaseDetail, CaseStatus } from "@/types";
 import { FileText, Clock, CheckSquare, Sparkles, AlertTriangle } from "lucide-react";
@@ -131,71 +132,9 @@ export function CaseDetailView({ caseDetail }: { caseDetail: CaseDetail }) {
 // ─── AI tools tab ─────────────────────────────────────────────────────────────
 
 function AiToolsPanel({ caseId, clientName }: { caseId: string; clientName: string }) {
-  const [letterLoading, setLetterLoading] = useState(false);
-  const [letter, setLetter] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleGenerateLetter = async () => {
-    setLetterLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/ai/letter", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ caseId }),
-      });
-      if (!res.ok) throw new Error("failed");
-      const data = await res.json();
-      setLetter(data.letter);
-    } catch {
-      setError("יצירת המכתב נכשלה. ודא שמפתח ה-API מוגדר ונסה שוב.");
-    } finally {
-      setLetterLoading(false);
-    }
-  };
-
   return (
     <div className="flex flex-col gap-6">
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <div className="flex items-start gap-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-600">
-            <Sparkles className="h-5 w-5" />
-          </div>
-          <div className="flex-1">
-            <h3 className="font-semibold text-slate-900">מחולל מכתבים בעברית</h3>
-            <p className="mt-1 text-sm text-slate-500 leading-relaxed">
-              יוצר מכתב בקשה/ערעור רשמי בעברית מקצועית עבור {clientName}, בהתבסס על פרופיל הלקוח ונתוני התיק.
-            </p>
-            <button
-              onClick={handleGenerateLetter}
-              disabled={letterLoading}
-              className="mt-3 flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60 transition-colors"
-            >
-              {letterLoading
-                ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> מייצר מכתב...</>
-                : <><Sparkles className="h-4 w-4" /> צור מכתב</>}
-            </button>
-            {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
-          </div>
-        </div>
-
-        {letter && (
-          <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-4">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-xs font-semibold text-violet-700">טיוטת מכתב</span>
-              <button
-                onClick={() => navigator.clipboard.writeText(letter)}
-                className="text-xs text-violet-600 hover:underline"
-              >
-                העתק
-              </button>
-            </div>
-            <pre className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700 font-sans" dir="rtl">
-              {letter}
-            </pre>
-          </div>
-        )}
-      </div>
+      <LetterGenerator caseId={caseId} clientName={clientName} />
 
       <div className="rounded-xl border border-slate-200 bg-white p-5">
         <div className="flex items-start gap-4">

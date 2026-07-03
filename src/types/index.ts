@@ -41,6 +41,19 @@ export type DocumentType =
 
 export type NoteType = "INTERNAL" | "CALL_LOG" | "EMAIL" | "MEETING" | "AUTHORITY_CONTACT" | "SYSTEM";
 export type TaskStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+export type LetterType =
+  | "CLAIM_REQUEST" | "APPEAL" | "SEVERITY_INCREASE" | "MEDICAL_COMMITTEE"
+  | "AUTHORITY_INQUIRY" | "COVER_LETTER" | "OTHER";
+
+export interface GeneratedLetterItem {
+  id: string;
+  letterType: LetterType;
+  title: string;
+  content: string;
+  context?: string | null;
+  createdAt: string;
+  createdByName?: string | null;
+}
 
 // ─── View models (safe for client-side rendering) ─────────────────────────────
 

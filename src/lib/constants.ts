@@ -126,6 +126,27 @@ export const GENDER_LABELS: Record<string, string> = {
   OTHER:  "אחר",
 };
 
+export const LETTER_TYPE_LABELS: Record<string, string> = {
+  CLAIM_REQUEST:     "מכתב בקשה / תביעה",
+  APPEAL:            "מכתב ערעור",
+  SEVERITY_INCREASE: "בקשה להחמרה / הגדלת אחוזים",
+  MEDICAL_COMMITTEE: "בקשה לוועדה רפואית",
+  AUTHORITY_INQUIRY: "פנייה / בירור מול הרשות",
+  COVER_LETTER:      "מכתב מלווה לצירוף מסמכים",
+  OTHER:             "מכתב כללי",
+};
+
+// Purpose hint injected into the Claude prompt per letter type.
+export const LETTER_TYPE_INSTRUCTIONS: Record<string, string> = {
+  CLAIM_REQUEST:     "מכתב בקשה/תביעה ראשונית להכרה בזכאות מול המוסד לביטוח לאומי.",
+  APPEAL:            "מכתב ערעור מנומק על החלטת הוועדה/הרשות, כולל בקשה לבחינה מחדש.",
+  SEVERITY_INCREASE: "בקשה לבחינה מחדש של אחוזי הנכות עקב החמרה במצב הרפואי.",
+  MEDICAL_COMMITTEE: "בקשה בנוגע לוועדה רפואית (זימון, דחייה, או ערר על החלטת ועדה).",
+  AUTHORITY_INQUIRY: "פנייה רשמית לבירור סטטוס התיק או קבלת מידע מהרשות.",
+  COVER_LETTER:      "מכתב מלווה קצר ורשמי המצרף מסמכים לתיק.",
+  OTHER:             "מכתב רשמי כללי בהתאם לפרטי הבקשה.",
+};
+
 export const PIPELINE_COLUMNS = [
   "NEW_INTAKE",
   "GATHERING_DOCUMENTS",

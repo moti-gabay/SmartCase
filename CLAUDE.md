@@ -43,8 +43,8 @@ NextAuth is split so the Edge middleware never imports Node-only code:
 
 **Do not import [auth.ts](auth.ts) or [src/lib/prisma.ts](src/lib/prisma.ts) from middleware or `auth.config.ts`.** `session.user.role` / `.id` are typed in [src/types/next-auth.d.ts](src/types/next-auth.d.ts).
 
-### Claude integration
-[src/lib/ai/claude.ts](src/lib/ai/claude.ts) lazily initializes the Anthropic client (so the module loads without `ANTHROPIC_API_KEY` in dev). Two functions: `analyzeDocument` (image/PDF → Hebrew JSON validation) and `generateHebrewLetter`. AI API routes live under `src/app/api/ai/**` and get a 60s/1GB budget in [vercel.json](vercel.json).
+### AI integration (Google Gemini)
+[src/lib/ai/gemini.ts](src/lib/ai/gemini.ts) lazily initializes the `@google/genai` client (so the module loads without `GEMINI_API_KEY` in dev) and uses model `gemini-2.5-flash-lite`. Functions: `analyzeDocument` (image/PDF → Hebrew JSON validation), `generateHebrewLetter`, and `refineHebrewLetter` (chat-style edits). All letter output is forced to plain text via prompt + a `stripMarkdown` sanitizer. AI API routes live under `src/app/api/ai/**` and get a 60s/1GB budget in [vercel.json](vercel.json).
 
 ### UI conventions
 - **RTL-first**: root `<html dir="rtl" lang="he">` with the Rubik font; `tailwindcss-rtl` is installed. Use logical properties (`border-e`, `ms-*`, `pe-*`) rather than left/right so RTL flips correctly. In flex layouts, first-in-DOM = right side.
