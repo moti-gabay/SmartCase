@@ -266,6 +266,7 @@ export function DocumentChecklist({ items, caseId, documents }: DocumentChecklis
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [showOptional, setShowOptional] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
   const [genOpen, setGenOpen] = useState(false);
   const [genType, setGenType] = useState<string>("MEDICAL_REPORT");
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -300,6 +301,7 @@ export function DocumentChecklist({ items, caseId, documents }: DocumentChecklis
   // ── Upload ──────────────────────────────────────────────────────────────────
   const triggerUpload = (payload: PendingUpload) => {
     setUploadError(null);
+    setUploadSuccess(null);
     pendingUpload.current = payload;
     fileInputRef.current?.click();
   };
@@ -369,8 +371,12 @@ export function DocumentChecklist({ items, caseId, documents }: DocumentChecklis
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ checklistItemId: payload.checklistItemId ?? null }),
       });
-      if (!confirmRes.ok) throw new Error("אישור ההעלאה נכשל");
+      if (!confirmRes.ok) {
+        const data = await confirmRes.json().catch(() => ({}));
+        throw new Error(data.error ?? "אישור ההעלאה נכשל");
+      }
 
+      setUploadSuccess(`המסמך "${payload.displayName}" הועלה בהצלחה`);
       startTransition(() => router.refresh());
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "העלאת המסמך נכשלה");
@@ -431,6 +437,12 @@ export function DocumentChecklist({ items, caseId, documents }: DocumentChecklis
       {uploadError && (
         <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
           <AlertTriangle className="h-4 w-4 shrink-0" /> {uploadError}
+        </div>
+      )}
+
+      {uploadSuccess && (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-700">
+          <CheckCircle2 className="h-4 w-4 shrink-0" /> {uploadSuccess}
         </div>
       )}
 
