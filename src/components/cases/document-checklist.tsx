@@ -355,12 +355,13 @@ export function DocumentChecklist({ items, caseId, documents }: DocumentChecklis
       }
       const { documentId, upload } = await presignRes.json();
 
-      // 2) Upload the bytes straight to S3 (no auth header; "file" must be last).
-      const form = new FormData();
-      Object.entries(upload.fields as Record<string, string>).forEach(([k, v]) => form.append(k, v));
-      form.append("file", file);
-      const s3res = await fetch(upload.url, { method: "POST", body: form });
-      if (!s3res.ok) throw new Error("העלאת הקובץ ל-S3 נכשלה");
+      // 2) Upload the bytes straight to R2 via presigned PUT (raw file body).
+      const s3res = await fetch(upload.url, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type },
+      });
+      if (!s3res.ok) throw new Error("העלאת הקובץ ל-R2 נכשלה");
 
       // 3) Confirm — promote the row and link the checklist item.
       const confirmRes = await fetch(`/api/documents/${documentId}/confirm`, {

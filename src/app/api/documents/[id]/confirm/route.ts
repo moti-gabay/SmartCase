@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/../auth";
 import { prisma } from "@/lib/prisma";
-import { objectExists } from "@/core/storage/s3-storage";
+import { headObject, deleteObject, MAX_UPLOAD_SIZE, ALLOWED_MIME } from "@/core/storage/s3-storage";
 
-// Step 3 of the upload: called after the browser has PUT/POSTed the bytes to S3.
-// Verifies the object actually landed, promotes the row to UPLOADED_PENDING_REVIEW,
-// links the checklist item, and recomputes the case's missing-docs flag.
+// Step 3 of the upload: called after the browser has PUT the bytes to R2.
+// Since a presigned PUT can't enforce size/type at the edge, we verify the object
+// server-side here (HeadObject), delete + reject anything invalid, then promote the
+// row to UPLOADED_PENDING_REVIEW, link the checklist item, and recompute the flag.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
@@ -21,11 +22,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     });
     if (!doc || !doc.storageKey) return NextResponse.json({ error: "המסמך לא נמצא" }, { status: 404 });
 
-    if (!(await objectExists(doc.storageKey))) {
-      return NextResponse.json({ error: "הקובץ לא נמצא ב-S3" }, { status: 409 });
+    const head = await headObject(doc.storageKey);
+    if (!head) return NextResponse.json({ error: "הקובץ לא נמצא ב-R2" }, { status: 409 });
+
+    // Server-side enforcement (the presigned PUT itself cannot cap these).
+    if (head.contentLength < 1 || head.contentLength > MAX_UPLOAD_SIZE) {
+      await deleteObject(doc.storageKey).catch(() => {});
+      return NextResponse.json({ error: "גודל הקובץ אינו תקין (עד 10MB)" }, { status: 409 });
+    }
+    if (head.contentType && !(ALLOWED_MIME as readonly string[]).includes(head.contentType)) {
+      await deleteObject(doc.storageKey).catch(() => {});
+      return NextResponse.json({ error: "סוג קובץ לא נתמך (PDF, JPG או PNG בלבד)" }, { status: 415 });
     }
 
-    await prisma.document.update({ where: { id }, data: { status: "UPLOADED_PENDING_REVIEW" } });
+    await prisma.document.update({
+      where: { id },
+      data: { status: "UPLOADED_PENDING_REVIEW", fileSize: head.contentLength },
+    });
 
     if (typeof checklistItemId === "string" && checklistItemId) {
       await prisma.caseChecklist.update({
