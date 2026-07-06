@@ -24,7 +24,7 @@ npm run db:studio    # prisma studio
 
 Dependencies must be installed with `npm install --legacy-peer-deps` (see [.npmrc](.npmrc)) — `@auth/prisma-adapter` under-declares its Prisma 7 peer range. Vercel uses the same install flag ([vercel.json](vercel.json)).
 
-There is no test runner configured.
+Unit tests use Node's built-in runner (`node:test`) via `tsx` — no extra deps. Run `npm test` (executes `tests/*.test.ts`). Coverage is the pure/deterministic logic: `src/lib/utils.ts`, the native `src/core/storage/s3-storage.ts` signer, and `src/lib/constants.ts` integrity. DB queries, API routes, and React components are covered by manual E2E, not unit tests.
 
 ## Architecture
 
