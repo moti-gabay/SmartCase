@@ -388,13 +388,17 @@ export function DocumentChecklist({ items, caseId, documents }: DocumentChecklis
 
   const handleDeleteDocument = () => {
     if (!deleteId) return;
+    setUploadError(null);
+    setUploadSuccess(null);
     startDelete(async () => {
       try {
         await deleteDocument(deleteId);
         setDeleteId(null);
+        setUploadSuccess("המסמך נמחק בהצלחה");
         router.refresh();
       } catch {
         setDeleteId(null);
+        setUploadError("מחיקת המסמך נכשלה");
       }
     });
   };
