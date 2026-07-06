@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { deleteCase, generatePortalLink } from "@/lib/actions";
+import { printSection } from "@/lib/print";
 import { CASE_STATUS_LABELS, CASE_TYPE_LABELS, PIPELINE_COLUMNS } from "@/lib/constants";
 import type { CaseDetail, CaseStatus } from "@/types";
 import {
@@ -175,7 +176,7 @@ export function CaseHeader({ caseDetail, checklistProgress, onStatusChange }: Ca
             )}
           </div>
 
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" onClick={() => printSection("summary")}>
             <Printer className="h-4 w-4" />
             הדפסה
           </Button>

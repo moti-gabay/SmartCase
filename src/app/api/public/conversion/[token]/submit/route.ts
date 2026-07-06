@@ -14,6 +14,8 @@ const childSchema = z.object({
 });
 
 const submitSchema = z.object({
+  // Honeypot field — must arrive empty. See conversion-portal-view.tsx.
+  honeypot: z.string().optional(),
   phone: z.string().optional(),
   email: z.string().email().optional().or(z.literal("")),
   addressCity: z.string().optional(),
@@ -35,6 +37,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
   const parsed = submitSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "נתוני הטופס אינם תקינים" }, { status: 400 });
   const data = parsed.data;
+
+  // Honeypot tripped — reject with the same generic message as a normal
+  // validation failure so a bot gets no signal it was specifically detected.
+  if (data.honeypot) {
+    return NextResponse.json({ error: "נתוני הטופס אינם תקינים" }, { status: 400 });
+  }
+
   const { caseId, clientId } = resolved;
 
   try {

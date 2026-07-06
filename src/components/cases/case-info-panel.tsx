@@ -1,4 +1,6 @@
 import { cn, formatDate, formatCurrency } from "@/lib/utils";
+import { PrintLetterhead } from "@/components/print/print-letterhead";
+import { CASE_STATUS_LABELS, CASE_TYPE_LABELS } from "@/lib/constants";
 import type { CaseDetail } from "@/types";
 import {
   User, Phone, Mail, MapPin, Briefcase,
@@ -55,6 +57,11 @@ export function CaseInfoPanel({ caseDetail }: CaseInfoPanelProps) {
 
   return (
     <div className="flex flex-col gap-6 p-5">
+      <PrintLetterhead
+        subtitle={`תיק ${caseDetail.caseNumber} — ${CASE_TYPE_LABELS[caseDetail.caseType]}`}
+        meta={`סטטוס: ${CASE_STATUS_LABELS[caseDetail.status]}`}
+      />
+
       {/* Client personal */}
       <Section title="פרטים אישיים">
         <Row icon={User} label="שם מלא" value={client.fullName} />

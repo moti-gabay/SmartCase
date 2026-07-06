@@ -49,6 +49,12 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
   );
   const set = (k: keyof typeof form, v: string) => setForm((p) => ({ ...p, [k]: v }));
 
+  // Honeypot: a field real visitors never see or fill, but naive bots that
+  // auto-fill every form input do. If it arrives non-empty, the server rejects
+  // the submission outright. Off-screen (not display:none) + tabIndex=-1 +
+  // aria-hidden so screen-reader/keyboard users never encounter it either.
+  const [honeypot, setHoneypot] = useState("");
+
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -75,6 +81,7 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
         body: JSON.stringify({
           ...form,
           children: children.filter((c) => c.fullName.trim()),
+          honeypot,
         }),
       });
       if (!res.ok) {
@@ -157,6 +164,20 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Honeypot — invisible to real users, see comment above the state. */}
+      <div aria-hidden="true" style={{ position: "absolute", left: "-9999px", top: "-9999px" }}>
+        <label htmlFor="website">Website</label>
+        <input
+          type="text"
+          id="website"
+          name="website"
+          tabIndex={-1}
+          autoComplete="off"
+          value={honeypot}
+          onChange={(e) => setHoneypot(e.target.value)}
+        />
+      </div>
+
       <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={handleFileSelected} />
 
       {/* Explainer */}

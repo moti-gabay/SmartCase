@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { PrintLetterhead } from "@/components/print/print-letterhead";
 import { LETTER_TYPE_LABELS } from "@/lib/constants";
 import { cn, formatDatetime } from "@/lib/utils";
+import { printSection } from "@/lib/print";
 import type { GeneratedLetterItem, LetterType } from "@/types";
-import { Sparkles, Copy, Check, Trash2, FileText, Loader2, Send, MessageSquare } from "lucide-react";
+import { Sparkles, Copy, Check, Trash2, FileText, Loader2, Send, MessageSquare, Download } from "lucide-react";
 
 type ChatMsg = { role: "user" | "assistant"; text: string };
 
@@ -161,19 +163,25 @@ export function LetterGenerator({ caseId, clientName }: { caseId?: string; clien
 
       {/* Current draft */}
       {current && (
-        <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50 p-4">
-          <div className="mb-2 flex items-center justify-between">
+        <div className="print-letter mt-4 rounded-xl border border-violet-200 bg-violet-50 p-4 print:rounded-none print:border-0 print:bg-white print:p-10">
+          <PrintLetterhead subtitle={current.title} />
+          <div className="mb-2 flex items-center justify-between print:hidden">
             <span className="text-xs font-semibold text-violet-700">{current.title}</span>
-            <button onClick={() => copy(current.content)} className="flex items-center gap-1 text-xs text-violet-600 hover:underline">
-              {copied ? <><Check className="h-3.5 w-3.5" /> הועתק</> : <><Copy className="h-3.5 w-3.5" /> העתק</>}
-            </button>
+            <div className="flex items-center gap-3">
+              <button onClick={() => copy(current.content)} className="flex items-center gap-1 text-xs text-violet-600 hover:underline">
+                {copied ? <><Check className="h-3.5 w-3.5" /> הועתק</> : <><Copy className="h-3.5 w-3.5" /> העתק</>}
+              </button>
+              <button onClick={() => printSection("letter")} className="flex items-center gap-1 text-xs text-indigo-600 hover:underline">
+                <Download className="h-3.5 w-3.5" /> הורד PDF רשמי
+              </button>
+            </div>
           </div>
-          <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-700 font-sans" dir="rtl">
+          <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-700 font-sans print:max-h-none print:overflow-visible print:text-black print:text-base" dir="rtl">
             {current.content}
           </pre>
 
           {/* Refinement chat */}
-          <div className="mt-3 border-t border-violet-200 pt-3">
+          <div className="mt-3 border-t border-violet-200 pt-3 print:hidden">
             <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-violet-700">
               <MessageSquare className="h-3.5 w-3.5" />
               שיפור המכתב — שלח הערות ו-Claude יעדכן

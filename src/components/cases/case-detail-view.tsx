@@ -60,7 +60,7 @@ export function CaseDetailView({ caseDetail }: { caseDetail: CaseDetail }) {
       />
 
       <div className="flex flex-1 overflow-hidden">
-        <aside className="hidden w-72 shrink-0 overflow-y-auto border-s border-slate-200 bg-white xl:block">
+        <aside className="print-summary hidden w-72 shrink-0 overflow-y-auto border-s border-slate-200 bg-white xl:block">
           <CaseInfoPanel caseDetail={caseData} />
         </aside>
 

@@ -52,3 +52,39 @@ body {
 }
 
 .urgent-pulse { animation: pulse-ring 1.5s ease-in-out infinite; }
+
+/* ── Print: isolate a single .print-summary or .print-letter region ──────────
+   Triggered via src/lib/print.ts (printSection), which tags <body> with
+   data-print-target right before window.print(). Both regions can be mounted
+   in the DOM at once (e.g. the case-summary sidebar is always present even
+   while viewing a letter), so we key visibility off which target was armed
+   rather than a single shared class — otherwise both would print at once. */
+@media print {
+  body[data-print-target] * {
+    visibility: hidden;
+  }
+
+  body[data-print-target="summary"] .print-summary,
+  body[data-print-target="summary"] .print-summary * {
+    visibility: visible;
+  }
+  body[data-print-target="summary"] .print-summary {
+    display: block;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    padding: 2rem;
+  }
+
+  body[data-print-target="letter"] .print-letter,
+  body[data-print-target="letter"] .print-letter * {
+    visibility: visible;
+  }
+  body[data-print-target="letter"] .print-letter {
+    display: block;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    padding: 2rem;
+  }
+}
