@@ -311,6 +311,7 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
       notes: { include: { author: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
       tasks: { include: { assignedTo: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
       statusHistory: { include: { changedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
+      conversionProfile: { include: { children: true } },
     },
   });
   if (!c) return null;
@@ -433,6 +434,24 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
       reason: s.reason ?? undefined,
       createdAt: s.createdAt.toISOString(),
     })),
+
+    conversionProfile: c.conversionProfile
+      ? {
+          spouseFullName: c.conversionProfile.spouseFullName,
+          spouseNationalId: c.conversionProfile.spouseNationalId,
+          spouseReligion: c.conversionProfile.spouseReligion,
+          communityName: c.conversionProfile.communityName,
+          sponsoringRabbi: c.conversionProfile.sponsoringRabbi,
+          courtName: c.conversionProfile.courtName,
+          additionalNotes: c.conversionProfile.additionalNotes,
+          submittedAt: iso(c.conversionProfile.submittedAt),
+          children: c.conversionProfile.children.map((ch) => ({
+            id: ch.id,
+            fullName: ch.fullName,
+            dateOfBirth: iso(ch.dateOfBirth),
+          })),
+        }
+      : null,
   };
 }
 
@@ -538,6 +557,126 @@ export async function getDocuments(): Promise<DocumentListItem[]> {
     clientName: d.case.client.fullName,
     uploadedByName: d.uploadedBy?.name ?? null,
   }));
+}
+
+// ─── Public conversion portal (unauthenticated) ─────────────────────────────────
+// SECURITY: this is the ONLY query the public /share/conversion/[token] route and
+// its API routes may use to load case data. It is a hand-picked, narrow projection
+// — never add internal-only fields here (staff notes, other agents, financials,
+// other cases, etc.). The token itself is the sole authorization check; callers
+// must not accept a client-supplied caseId anywhere in the public surface.
+
+export interface PortalChecklistItem {
+  id: string;
+  documentType: string;
+  displayName: string;
+  isMandatory: boolean;
+  status: DocumentStatus;
+}
+
+export interface PortalCaseView {
+  id: string;
+  caseNumber: string;
+  status: CaseStatus;
+  client: {
+    id: string;
+    fullName: string;
+    nationalId: string;
+    dateOfBirth: string;
+    phone: string;
+    email?: string | null;
+    addressCity?: string | null;
+  };
+  conversionProfile: {
+    spouseFullName?: string | null;
+    spouseNationalId?: string | null;
+    spouseReligion?: string | null;
+    communityName?: string | null;
+    sponsoringRabbi?: string | null;
+    courtName?: string | null;
+    additionalNotes?: string | null;
+    children: { id: string; fullName: string; dateOfBirth?: string | null }[];
+  } | null;
+  checklist: PortalChecklistItem[];
+}
+
+export async function getPortalCaseByToken(token: string): Promise<PortalCaseView | null> {
+  if (!token) return null;
+
+  const c = await prisma.case.findUnique({
+    where: { clientPortalToken: token },
+    select: {
+      id: true,
+      caseNumber: true,
+      status: true,
+      clientPortalTokenExpiresAt: true,
+      client: {
+        select: {
+          id: true, fullName: true, nationalId: true, dateOfBirth: true,
+          phone: true, email: true, addressCity: true,
+        },
+      },
+      conversionProfile: { include: { children: true } },
+      checklist: {
+        include: { template: true },
+        orderBy: { template: { sortOrder: "asc" } },
+      },
+    },
+  });
+
+  if (!c) return null;
+  if (c.clientPortalTokenExpiresAt && c.clientPortalTokenExpiresAt < new Date()) return null;
+
+  return {
+    id: c.id,
+    caseNumber: c.caseNumber,
+    status: c.status,
+    client: {
+      id: c.client.id,
+      fullName: c.client.fullName,
+      nationalId: c.client.nationalId,
+      dateOfBirth: c.client.dateOfBirth.toISOString(),
+      phone: c.client.phone,
+      email: c.client.email,
+      addressCity: c.client.addressCity,
+    },
+    conversionProfile: c.conversionProfile
+      ? {
+          spouseFullName: c.conversionProfile.spouseFullName,
+          spouseNationalId: c.conversionProfile.spouseNationalId,
+          spouseReligion: c.conversionProfile.spouseReligion,
+          communityName: c.conversionProfile.communityName,
+          sponsoringRabbi: c.conversionProfile.sponsoringRabbi,
+          courtName: c.conversionProfile.courtName,
+          additionalNotes: c.conversionProfile.additionalNotes,
+          children: c.conversionProfile.children.map((ch) => ({
+            id: ch.id,
+            fullName: ch.fullName,
+            dateOfBirth: iso(ch.dateOfBirth),
+          })),
+        }
+      : null,
+    checklist: c.checklist.map((item) => ({
+      id: item.id,
+      documentType: item.template.documentType,
+      displayName: item.template.displayName,
+      isMandatory: item.template.isMandatory,
+      status: item.status,
+    })),
+  };
+}
+
+// Resolves an active (non-expired) token to its owning case id — used by the
+// public presign/confirm/submit routes. Never trust a client-supplied caseId.
+export async function resolvePortalToken(token: string): Promise<{ caseId: string; clientId: string } | null> {
+  if (!token) return null;
+  const c = await prisma.case.findUnique({
+    where: { clientPortalToken: token },
+    select: { id: true, clientId: true, clientPortalTokenExpiresAt: true },
+  });
+  if (!c) return null;
+  if (c.clientPortalTokenExpiresAt && c.clientPortalTokenExpiresAt < new Date()) return null;
+  return { caseId: c.id, clientId: c.clientId };
 }
 
 export async function getAgents(): Promise<UserSummary[]> {

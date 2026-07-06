@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/../auth";
@@ -97,7 +98,7 @@ export async function setTaskStatus(taskId: string, status: TaskStatus) {
 const CASE_TYPES = [
   "DISABILITY_PENSION", "GENERAL_DISABILITY_ALLOWANCE", "MOBILITY_ALLOWANCE",
   "INCOME_SUPPORT", "LONG_TERM_CARE", "SURVIVORS_BENEFIT", "WORK_ACCIDENT",
-  "OCCUPATIONAL_DISEASE", "APPEAL", "OTHER",
+  "OCCUPATIONAL_DISEASE", "APPEAL", "CONVERSION", "OTHER",
 ] as const;
 
 const newClientSchema = z.object({
@@ -396,3 +397,35 @@ export async function changeCaseStatus(caseId: string, newStatus: CaseStatus, re
   revalidatePath("/cases");
   revalidatePath("/dashboard");
 }
+
+// ─── Client portal link (conversion cases) ──────────────────────────────────────
+
+// Generates (or rotates) the public share link for a case. The token is a
+// high-entropy random bearer secret (256 bits) — unguessable, not derived from
+// any predictable data — stored directly as the unique lookup key. Regenerating
+// overwrites the previous token, which immediately invalidates any leaked link
+// (rotate-to-revoke; no separate revoke UI needed).
+const PORTAL_TOKEN_TTL_DAYS = 30;
+
+export async function generatePortalLink(caseId: string): Promise<{ token: string; expiresAt: string }> {
+  await requireUserId();
+
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + PORTAL_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+
+  await prisma.case.update({
+    where: { id: caseId },
+    data: { clientPortalToken: token, clientPortalTokenExpiresAt: expiresAt },
+  });
+
+  revalidatePath(`/cases/${caseId}`);
+  return { token, expiresAt: expiresAt.toISOString() };
+}
+
+// NOTE: the public conversion-portal submission logic (profile + children) lives
+// in src/app/api/public/conversion/[token]/submit/route.ts, NOT here. This file
+// is "use server", which turns every export into a network-invokable Server
+// Action if it's ever imported into a "use client" component; a function that
+// trusts a caller-supplied caseId (as the portal submission must, since there's
+// no session) must never risk being wired up that way. Keeping it in a
+// server-only route file makes that trust boundary structural, not conventional.

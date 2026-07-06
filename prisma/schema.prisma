@@ -42,6 +42,7 @@ enum CaseType {
   WORK_ACCIDENT
   OCCUPATIONAL_DISEASE
   APPEAL
+  CONVERSION
   OTHER
 }
 
@@ -79,6 +80,9 @@ enum DocumentType {
   AUTHORITY_DECISION_LETTER
   APPEAL_LETTER
   POWER_OF_ATTORNEY
+  RABBI_LETTER
+  COMMUNITY_LETTER
+  FAMILY_PHOTO
   OTHER
 }
 
@@ -211,15 +215,23 @@ model Case {
   updatedAt                DateTime   @updatedAt
   closedAt                 DateTime?
 
-  client        Client              @relation(fields: [clientId], references: [id])
-  assignedAgent User?               @relation("AssignedAgent", fields: [assignedAgentId], references: [id])
-  createdBy     User                @relation("CaseCreator", fields: [createdById], references: [id])
-  documents     Document[]
-  notes         Note[]
-  tasks         Task[]
-  statusHistory CaseStatusHistory[]
-  checklist     CaseChecklist[]
-  letters       GeneratedLetter[]
+  // Public client-portal share link (see ConversionProfile). The token is a
+  // high-entropy random bearer secret, not a field-level-encrypted value —
+  // only its presence + expiry are checked, so encryption would add no
+  // security here. Rotate (regenerate) to revoke a leaked link.
+  clientPortalToken          String?   @unique
+  clientPortalTokenExpiresAt DateTime?
+
+  client            Client              @relation(fields: [clientId], references: [id])
+  assignedAgent     User?               @relation("AssignedAgent", fields: [assignedAgentId], references: [id])
+  createdBy         User                @relation("CaseCreator", fields: [createdById], references: [id])
+  documents         Document[]
+  notes             Note[]
+  tasks             Task[]
+  statusHistory     CaseStatusHistory[]
+  checklist         CaseChecklist[]
+  letters           GeneratedLetter[]
+  conversionProfile ConversionProfile?
 
   @@index([clientId])
   @@index([assignedAgentId])
@@ -399,4 +411,40 @@ model GeneratedLetter {
 
   @@index([caseId])
   @@map("generated_letters")
+}
+
+// ─── Conversion (גיור) case metadata ────────────────────────────────────────────
+// Case-type-specific profile, editable by the client through the public portal
+// (identity fields on Client/Case itself remain staff-only / read-only there).
+
+model ConversionProfile {
+  id               String    @id @default(cuid())
+  caseId           String    @unique
+  spouseFullName   String?
+  spouseNationalId String?
+  spouseReligion   String?
+  communityName    String?
+  sponsoringRabbi  String?
+  courtName        String?
+  additionalNotes  String?   @db.Text
+  submittedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  case     Case              @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  children ConversionChild[]
+
+  @@map("conversion_profiles")
+}
+
+model ConversionChild {
+  id                  String    @id @default(cuid())
+  conversionProfileId String
+  fullName            String
+  dateOfBirth         DateTime?
+
+  conversionProfile ConversionProfile @relation(fields: [conversionProfileId], references: [id], onDelete: Cascade)
+
+  @@index([conversionProfileId])
+  @@map("conversion_children")
 }

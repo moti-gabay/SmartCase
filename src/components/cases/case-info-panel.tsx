@@ -3,6 +3,7 @@ import type { CaseDetail } from "@/types";
 import {
   User, Phone, Mail, MapPin, Briefcase,
   Stethoscope, Calendar, Percent, Clock, Hash,
+  Users2, Building2, HeartHandshake, Scale as ScaleIcon,
 } from "lucide-react";
 
 interface RowProps {
@@ -110,6 +111,35 @@ export function CaseInfoPanel({ caseDetail }: CaseInfoPanelProps) {
         )}
         <Row icon={Stethoscope} label="רופא מטפל" value={client.treatingPhysician} />
       </Section>
+
+      {caseDetail.caseType === "CONVERSION" && caseDetail.conversionProfile && (
+        <>
+          <div className="border-t border-slate-100" />
+          <Section title="פרטי גיור">
+            <Row icon={Users2} label="בן/בת זוג" value={caseDetail.conversionProfile.spouseFullName} />
+            <Row icon={Hash} label="ת.ז. בן/בת זוג" value={caseDetail.conversionProfile.spouseNationalId} valueClassName="font-mono" />
+            <Row icon={Building2} label="קהילה" value={caseDetail.conversionProfile.communityName} />
+            <Row icon={HeartHandshake} label="רב מלווה" value={caseDetail.conversionProfile.sponsoringRabbi} />
+            <Row icon={ScaleIcon} label="בית דין" value={caseDetail.conversionProfile.courtName} />
+            {caseDetail.conversionProfile.children.length > 0 && (
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">ילדים</p>
+                <ul className="mt-1 flex flex-col gap-0.5">
+                  {caseDetail.conversionProfile.children.map((child) => (
+                    <li key={child.id} className="text-sm font-medium text-slate-800">
+                      {child.fullName}
+                      {child.dateOfBirth && <span className="text-slate-400"> · {formatDate(child.dateOfBirth)}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {caseDetail.conversionProfile.submittedAt && (
+              <Row icon={Clock} label="עודכן על ידי הלקוח" value={formatDate(caseDetail.conversionProfile.submittedAt)} />
+            )}
+          </Section>
+        </>
+      )}
 
       <div className="border-t border-slate-100" />
 

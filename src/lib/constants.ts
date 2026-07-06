@@ -49,6 +49,7 @@ export const CASE_TYPE_LABELS: Record<string, string> = {
   WORK_ACCIDENT:                  "תאונת עבודה",
   OCCUPATIONAL_DISEASE:           "מחלת מקצוע",
   APPEAL:                         "ערעור",
+  CONVERSION:                     "הליך גיור",
   OTHER:                          "אחר",
 };
 
@@ -100,6 +101,9 @@ export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   AUTHORITY_DECISION_LETTER: "מכתב החלטת רשות",
   APPEAL_LETTER:             "מכתב ערעור",
   POWER_OF_ATTORNEY:         "ייפוי כוח",
+  RABBI_LETTER:              "מכתב המלצה מרב",
+  COMMUNITY_LETTER:          "מכתב המלצה מהקהילה",
+  FAMILY_PHOTO:              "תמונה משפחתית",
   OTHER:                     "אחר",
 };
 

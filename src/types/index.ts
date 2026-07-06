@@ -26,6 +26,7 @@ export type CaseType =
   | "WORK_ACCIDENT"
   | "OCCUPATIONAL_DISEASE"
   | "APPEAL"
+  | "CONVERSION"
   | "OTHER";
 
 export type Priority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
@@ -37,7 +38,8 @@ export type DocumentType =
   | "HOSPITALIZATION_SUMMARY" | "SPECIALIST_REFERRAL" | "PRESCRIPTION"
   | "LAB_RESULTS" | "INCOME_TAX_RETURN" | "SPOUSE_INCOME_PROOF"
   | "DISABILITY_CERTIFICATE" | "PHOTOGRAPH" | "AUTHORITY_DECISION_LETTER"
-  | "APPEAL_LETTER" | "POWER_OF_ATTORNEY" | "OTHER";
+  | "APPEAL_LETTER" | "POWER_OF_ATTORNEY"
+  | "RABBI_LETTER" | "COMMUNITY_LETTER" | "FAMILY_PHOTO" | "OTHER";
 
 export type NoteType = "INTERNAL" | "CALL_LOG" | "EMAIL" | "MEETING" | "AUTHORITY_CONTACT" | "SYSTEM";
 export type TaskStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
@@ -189,6 +191,24 @@ export interface TaskDetail {
   createdAt: string;
 }
 
+export interface ConversionChildDetail {
+  id: string;
+  fullName: string;
+  dateOfBirth?: string | null;
+}
+
+export interface ConversionProfileDetail {
+  spouseFullName?: string | null;
+  spouseNationalId?: string | null;
+  spouseReligion?: string | null;
+  communityName?: string | null;
+  sponsoringRabbi?: string | null;
+  courtName?: string | null;
+  additionalNotes?: string | null;
+  submittedAt?: string | null;
+  children: ConversionChildDetail[];
+}
+
 export interface StatusHistoryEntry {
   id: string;
   previousStatus?: CaseStatus;
@@ -247,6 +267,7 @@ export interface CaseDetail {
   notes: NoteDetail[];
   tasks: TaskDetail[];
   statusHistory: StatusHistoryEntry[];
+  conversionProfile?: ConversionProfileDetail | null;
 }
 
 // ─── Client Detail (profile + edit) ─────────────────────────────────────────────

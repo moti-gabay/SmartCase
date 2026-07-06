@@ -38,6 +38,9 @@ const DOC_ICONS: Record<string, React.ElementType> = {
   AUTHORITY_DECISION_LETTER: ShieldCheck,
   APPEAL_LETTER:           FileText,
   POWER_OF_ATTORNEY:       FileText,
+  RABBI_LETTER:            FileBadge,
+  COMMUNITY_LETTER:        Building2,
+  FAMILY_PHOTO:            Camera,
   OTHER:                   FileText,
 };
 
