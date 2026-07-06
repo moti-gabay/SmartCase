@@ -1,12 +1,17 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn, formatDate } from "@/lib/utils";
 import type { PortalCaseView, PortalChecklistItem } from "@/lib/queries";
+import {
+  PORTAL_LOCALE_DIR, portalDict, translateChecklistLabel, type PortalLocale,
+} from "@/lib/i18n/conversion-portal";
+import { LanguageSwitcher } from "@/components/portal/language-switcher";
 import {
   BookOpen, ClipboardList, Send, HeartHandshake, Users2,
   User, Phone, Mail, MapPin, Plus, X, Upload, CheckCircle2,
   AlertTriangle, Loader2, CreditCard, FileBadge, Building2, Camera, FileText,
+  Scale, ShieldAlert,
 } from "lucide-react";
 
 const DOC_ICONS: Record<string, React.ElementType> = {
@@ -29,7 +34,86 @@ interface ChildRow {
   dateOfBirth: string;
 }
 
-export function ConversionPortalView({ token, caseView }: { token: string; caseView: PortalCaseView }) {
+// Toggles the shared <html> dir/lang while this page is mounted, restoring the
+// app-wide Hebrew/RTL default on unmount. This is a client-side-only toggle
+// (no localized routes) — the lightest option that satisfies "switch on the
+// fly"; a crawler or no-JS visitor always sees the Hebrew SSR output.
+function usePortalDirection(locale: PortalLocale) {
+  useEffect(() => {
+    document.documentElement.dir = PORTAL_LOCALE_DIR[locale];
+    document.documentElement.lang = locale;
+    return () => {
+      document.documentElement.dir = "rtl";
+      document.documentElement.lang = "he";
+    };
+  }, [locale]);
+}
+
+function PortalHeader({ locale, onLocaleChange }: { locale: PortalLocale; onLocaleChange: (l: PortalLocale) => void }) {
+  const t = portalDict[locale];
+  return (
+    <header className="border-b border-slate-200 bg-white">
+      <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white">
+            <Scale className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-slate-900">SmartCase</p>
+            <p className="text-[11px] text-slate-400">{t.portalSubtitle}</p>
+          </div>
+        </div>
+        <LanguageSwitcher locale={locale} onChange={onLocaleChange} />
+      </div>
+    </header>
+  );
+}
+
+export function ConversionPortalView({ token, caseView }: { token: string; caseView: PortalCaseView | null }) {
+  const [locale, setLocale] = useState<PortalLocale>("he");
+  usePortalDirection(locale);
+  const t = portalDict[locale];
+
+  if (!caseView) {
+    return (
+      <div className="flex min-h-screen flex-col bg-slate-50">
+        <PortalHeader locale={locale} onLocaleChange={setLocale} />
+        <main className="flex flex-1 items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-2xl">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-red-500">
+              <ShieldAlert className="h-7 w-7" />
+            </div>
+            <h1 className="text-xl font-bold text-slate-900">{t.invalidLinkTitle}</h1>
+            <p className="mt-2 text-sm leading-relaxed text-slate-500">{t.invalidLinkBody}</p>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <PortalHeader locale={locale} onLocaleChange={setLocale} />
+      <main className="mx-auto max-w-3xl px-4 py-8">
+        <ConversionPortalForm token={token} caseView={caseView} locale={locale} />
+      </main>
+      <footer className="py-6 text-center text-xs text-slate-400">{t.footerNote}</footer>
+    </div>
+  );
+}
+
+// ─── The interactive form + upload body (unchanged behavior, now translated) ───
+
+function ConversionPortalForm({
+  token,
+  caseView,
+  locale,
+}: {
+  token: string;
+  caseView: PortalCaseView;
+  locale: PortalLocale;
+}) {
+  const t = portalDict[locale];
   const { client, conversionProfile, checklist } = caseView;
 
   const [form, setForm] = useState({
@@ -53,6 +137,8 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
   // auto-fill every form input do. If it arrives non-empty, the server rejects
   // the submission outright. Off-screen (not display:none) + tabIndex=-1 +
   // aria-hidden so screen-reader/keyboard users never encounter it either.
+  // Deliberately NOT translated/localized — it's invisible in every language
+  // by design, and its English field name is what naive spam bots target.
   const [honeypot, setHoneypot] = useState("");
 
   const [saving, setSaving] = useState(false);
@@ -70,6 +156,11 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
   const setChild = (i: number, k: keyof ChildRow, v: string) =>
     setChildren((c) => c.map((row, idx) => (idx === i ? { ...row, [k]: v } : row)));
 
+  // NOTE (i18n scope, point 5): the payload shape below — field names, JSON
+  // structure, endpoints — is completely independent of `locale`. Only the
+  // on-screen labels are translated; the wire format sent to
+  // /api/public/conversion/... is byte-for-byte the same regardless of which
+  // language is selected in the UI.
   const submitProfile = async () => {
     setSaving(true);
     setSaved(false);
@@ -86,11 +177,11 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? "שמירת הפרטים נכשלה");
+        throw new Error(data.error ?? t.saveErrorFallback);
       }
       setSaved(true);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "שמירת הפרטים נכשלה");
+      setSaveError(err instanceof Error ? err.message : t.saveErrorFallback);
     } finally {
       setSaving(false);
     }
@@ -109,12 +200,12 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
     if (!file || !checklistItemId) return;
 
     if (file.size > MAX_SIZE) {
-      setUploadError("הקובץ גדול מדי (מקסימום 10MB)");
+      setUploadError(t.fileTooLarge);
       pendingItemId.current = null;
       return;
     }
     if (!ALLOWED_MIME.includes(file.type)) {
-      setUploadError("סוג קובץ לא נתמך (PDF, JPG או PNG בלבד)");
+      setUploadError(t.fileTypeInvalid);
       pendingItemId.current = null;
       return;
     }
@@ -134,12 +225,12 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
       });
       if (!presignRes.ok) {
         const data = await presignRes.json().catch(() => ({}));
-        throw new Error(data.error ?? "יצירת ההעלאה נכשלה");
+        throw new Error(data.error ?? t.uploadFailedFallback);
       }
       const { documentId, upload } = await presignRes.json();
 
       const putRes = await fetch(upload.url, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
-      if (!putRes.ok) throw new Error("העלאת הקובץ נכשלה");
+      if (!putRes.ok) throw new Error(t.uploadFailedFallback);
 
       const confirmRes = await fetch(`/api/public/conversion/${token}/confirm`, {
         method: "POST",
@@ -148,12 +239,12 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
       });
       if (!confirmRes.ok) {
         const data = await confirmRes.json().catch(() => ({}));
-        throw new Error(data.error ?? "אישור ההעלאה נכשל");
+        throw new Error(data.error ?? t.uploadFailedFallback);
       }
 
       setItems((prev) => prev.map((it) => (it.id === checklistItemId ? { ...it, status: "UPLOADED_PENDING_REVIEW" } : it)));
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "העלאת המסמך נכשלה");
+      setUploadError(err instanceof Error ? err.message : t.uploadFailedFallback);
     } finally {
       setUploadingId(null);
       pendingItemId.current = null;
@@ -187,17 +278,13 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
             <BookOpen className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-slate-900">ברוכים הבאים לפורטל הלקוח</h1>
-            <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-              המשרד מלווה אתכם לאורך כל הליך הגיור — מרגע פתיחת התיק ועד לקבלת ההכרה מבית הדין.
-              דרך העמוד הזה תוכלו לעדכן את הפרטים האישיים והמשפחתיים שלכם, ולהעלות את המסמכים הנדרשים
-              ישירות ובאופן מאובטח, ללא צורך בהדפסה או שליחה במייל.
-            </p>
+            <h1 className="text-lg font-bold text-slate-900">{t.welcomeTitle}</h1>
+            <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{t.welcomeBody}</p>
             <div className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
               {[
-                { icon: ClipboardList, text: "איסוף פרטים ומסמכים" },
-                { icon: HeartHandshake, text: "ליווי אישי מהמשרד" },
-                { icon: CheckCircle2, text: "הגשה ומעקב עד להכרעה" },
+                { icon: ClipboardList, text: t.step1 },
+                { icon: HeartHandshake, text: t.step2 },
+                { icon: CheckCircle2, text: t.step3 },
               ].map(({ icon: Icon, text }) => (
                 <div key={text} className="flex items-center gap-2 rounded-lg bg-white/70 px-3 py-2 text-xs font-medium text-indigo-800">
                   <Icon className="h-4 w-4 shrink-0" />
@@ -212,24 +299,24 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
       {/* Personal details */}
       <div className={card}>
         <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-900">
-          <User className="h-4 w-4 text-slate-400" /> פרטים אישיים
+          <User className="h-4 w-4 text-slate-400" /> {t.personalTitle}
         </h2>
         <div className="mb-4 grid grid-cols-1 gap-3 rounded-lg bg-slate-50 p-3 sm:grid-cols-3">
-          <div><p className="text-[11px] text-slate-400">שם מלא</p><p className="text-sm font-medium text-slate-800">{client.fullName}</p></div>
-          <div><p className="text-[11px] text-slate-400">תעודת זהות</p><p className="font-mono text-sm font-medium text-slate-800">{client.nationalId}</p></div>
-          <div><p className="text-[11px] text-slate-400">תאריך לידה</p><p className="text-sm font-medium text-slate-800">{formatDate(client.dateOfBirth)} (גיל {age})</p></div>
+          <div><p className="text-[11px] text-slate-400">{t.fullName}</p><p className="text-sm font-medium text-slate-800">{client.fullName}</p></div>
+          <div><p className="text-[11px] text-slate-400">{t.nationalId}</p><p className="font-mono text-sm font-medium text-slate-800">{client.nationalId}</p></div>
+          <div><p className="text-[11px] text-slate-400">{t.dateOfBirth}</p><p className="text-sm font-medium text-slate-800">{formatDate(client.dateOfBirth)} ({t.age} {age})</p></div>
         </div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
-            <label className={labelCls}><Phone className="me-1 inline h-3.5 w-3.5" />טלפון</label>
+            <label className={labelCls}><Phone className="me-1 inline h-3.5 w-3.5" />{t.phone}</label>
             <input className={inputCls} value={form.phone} onChange={(e) => set("phone", e.target.value)} />
           </div>
           <div>
-            <label className={labelCls}><Mail className="me-1 inline h-3.5 w-3.5" />אימייל</label>
+            <label className={labelCls}><Mail className="me-1 inline h-3.5 w-3.5" />{t.email}</label>
             <input type="email" className={inputCls} value={form.email} onChange={(e) => set("email", e.target.value)} />
           </div>
           <div>
-            <label className={labelCls}><MapPin className="me-1 inline h-3.5 w-3.5" />עיר מגורים</label>
+            <label className={labelCls}><MapPin className="me-1 inline h-3.5 w-3.5" />{t.addressCity}</label>
             <input className={inputCls} value={form.addressCity} onChange={(e) => set("addressCity", e.target.value)} />
           </div>
         </div>
@@ -238,32 +325,32 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
       {/* Spouse & family */}
       <div className={card}>
         <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-900">
-          <Users2 className="h-4 w-4 text-slate-400" /> בן/בת זוג ומשפחה
+          <Users2 className="h-4 w-4 text-slate-400" /> {t.familyTitle}
         </h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div><label className={labelCls}>שם בן/בת הזוג</label><input className={inputCls} value={form.spouseFullName} onChange={(e) => set("spouseFullName", e.target.value)} /></div>
-          <div><label className={labelCls}>תעודת זהות בן/בת הזוג</label><input className={inputCls} value={form.spouseNationalId} onChange={(e) => set("spouseNationalId", e.target.value)} /></div>
-          <div><label className={labelCls}>דת בן/בת הזוג</label><input className={inputCls} value={form.spouseReligion} onChange={(e) => set("spouseReligion", e.target.value)} /></div>
-          <div><label className={labelCls}>קהילה / בית כנסת</label><input className={inputCls} value={form.communityName} onChange={(e) => set("communityName", e.target.value)} /></div>
-          <div><label className={labelCls}>רב מלווה</label><input className={inputCls} value={form.sponsoringRabbi} onChange={(e) => set("sponsoringRabbi", e.target.value)} /></div>
-          <div><label className={labelCls}>בית דין</label><input className={inputCls} value={form.courtName} onChange={(e) => set("courtName", e.target.value)} /></div>
+          <div><label className={labelCls}>{t.spouseFullName}</label><input className={inputCls} value={form.spouseFullName} onChange={(e) => set("spouseFullName", e.target.value)} /></div>
+          <div><label className={labelCls}>{t.spouseNationalId}</label><input className={inputCls} value={form.spouseNationalId} onChange={(e) => set("spouseNationalId", e.target.value)} /></div>
+          <div><label className={labelCls}>{t.spouseReligion}</label><input className={inputCls} value={form.spouseReligion} onChange={(e) => set("spouseReligion", e.target.value)} /></div>
+          <div><label className={labelCls}>{t.communityName}</label><input className={inputCls} value={form.communityName} onChange={(e) => set("communityName", e.target.value)} /></div>
+          <div><label className={labelCls}>{t.sponsoringRabbi}</label><input className={inputCls} value={form.sponsoringRabbi} onChange={(e) => set("sponsoringRabbi", e.target.value)} /></div>
+          <div><label className={labelCls}>{t.courtName}</label><input className={inputCls} value={form.courtName} onChange={(e) => set("courtName", e.target.value)} /></div>
         </div>
 
         {/* Children */}
         <div className="mt-4">
           <div className="mb-2 flex items-center justify-between">
-            <label className={labelCls}>ילדים</label>
+            <label className={labelCls}>{t.childrenLabel}</label>
             <button type="button" onClick={addChild} className="flex items-center gap-1 text-xs font-medium text-indigo-600 hover:underline">
-              <Plus className="h-3.5 w-3.5" /> הוסף ילד/ה
+              <Plus className="h-3.5 w-3.5" /> {t.addChild}
             </button>
           </div>
-          {children.length === 0 && <p className="text-xs text-slate-400">אין ילדים רשומים</p>}
+          {children.length === 0 && <p className="text-xs text-slate-400">{t.noChildren}</p>}
           <div className="flex flex-col gap-2">
             {children.map((c, i) => (
               <div key={i} className="flex items-center gap-2">
                 <input
                   className={inputCls}
-                  placeholder="שם מלא"
+                  placeholder={t.childNamePlaceholder}
                   value={c.fullName}
                   onChange={(e) => setChild(i, "fullName", e.target.value)}
                 />
@@ -282,7 +369,7 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
         </div>
 
         <div>
-          <label className={cn(labelCls, "mt-4")}>הערות נוספות</label>
+          <label className={cn(labelCls, "mt-4")}>{t.additionalNotes}</label>
           <textarea
             className="min-h-[80px] w-full rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
             value={form.additionalNotes}
@@ -291,7 +378,7 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
         </div>
 
         {saveError && <p className="mt-3 text-sm text-red-600">{saveError}</p>}
-        {saved && <p className="mt-3 flex items-center gap-1.5 text-sm text-emerald-600"><CheckCircle2 className="h-4 w-4" /> הפרטים נשמרו בהצלחה</p>}
+        {saved && <p className="mt-3 flex items-center gap-1.5 text-sm text-emerald-600"><CheckCircle2 className="h-4 w-4" /> {t.saveSuccess}</p>}
 
         <div className="mt-4 flex justify-end">
           <button
@@ -300,7 +387,7 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
             className="flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            {saving ? "שומר..." : "שמור פרטים"}
+            {saving ? t.saving : t.saveButton}
           </button>
         </div>
       </div>
@@ -308,9 +395,9 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
       {/* Documents */}
       <div className={card}>
         <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-900">
-          <FileText className="h-4 w-4 text-slate-400" /> מסמכים נדרשים
+          <FileText className="h-4 w-4 text-slate-400" /> {t.documentsTitle}
         </h2>
-        <p className="mb-4 text-xs text-slate-400">PDF, JPG או PNG · עד 10MB לקובץ</p>
+        <p className="mb-4 text-xs text-slate-400">{t.documentsHint}</p>
 
         {uploadError && (
           <div className="mb-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
@@ -323,6 +410,7 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
             const Icon = DOC_ICONS[item.documentType] ?? FileText;
             const isDone = item.status !== "MISSING" && item.status !== "REJECTED" && item.status !== "PENDING_UPLOAD";
             const isUploading = uploadingId === item.id;
+            const label = translateChecklistLabel(locale, item.documentType, item.displayName);
             return (
               <div
                 key={item.id}
@@ -336,10 +424,10 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold text-slate-800">{item.displayName}</span>
+                    <span className="text-sm font-semibold text-slate-800">{label}</span>
                     {item.isMandatory
-                      ? <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-500 border border-red-200">חובה</span>
-                      : <span className="rounded bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-400 border border-slate-200">אופציונלי</span>}
+                      ? <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-500 border border-red-200">{t.mandatory}</span>
+                      : <span className="rounded bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-400 border border-slate-200">{t.optional}</span>}
                   </div>
                 </div>
                 <button
@@ -352,7 +440,7 @@ export function ConversionPortalView({ token, caseView }: { token: string; caseV
                   )}
                 >
                   {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : isDone ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Upload className="h-3.5 w-3.5" />}
-                  {isUploading ? "מעלה..." : isDone ? "הועלה – החלף" : "העלה"}
+                  {isUploading ? t.uploading : isDone ? t.uploaded : t.upload}
                 </button>
               </div>
             );
