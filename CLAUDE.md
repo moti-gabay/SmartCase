@@ -3,10 +3,13 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 @AGENTS.md
+@ROLES.md
 
 ## What this is
 
-SmartCase is a Hebrew (RTL) CRM for managing Israeli National Insurance (ביטוח לאומי) disability claims. Case agents track clients, cases, required documents, tasks, and use Claude to validate uploaded documents and draft official Hebrew letters. UI copy, enum labels, and AI prompts are all in Hebrew.
+SmartCase is the foundation of a proactive, multi-tenant SaaS ecosystem for law and consulting firms, spanning 7 core domains — including National Insurance, Guardianship, and Conversion — across medical, legal, and bureaucratic casework. Today it runs as a single-office Hebrew (RTL) CRM live across 2 of those domains (National Insurance disability claims, Conversion); case agents track clients, cases, required documents, and tasks, and use Claude to validate uploaded documents and draft official Hebrew letters. UI copy, enum labels, and AI prompts are all in Hebrew.
+
+See [ROLES.md](ROLES.md) for the project roles & personas (the user, the business stakeholder, and Claude's behavioral guardrails on this project).
 
 ## Commands
 
@@ -53,3 +56,24 @@ NextAuth is split so the Edge middleware never imports Node-only code:
 
 ### Data layer status
 Dashboard/cases/clients pages currently render from mock data (`src/lib/mock-*.ts`), while the Prisma schema, auth, and register API route are wired to the real database. When building features, prefer moving pages onto `prisma` queries rather than extending the mock files.
+
+## Engineering invariants (do not violate)
+
+These were established deliberately, several after hitting a real bug or running a live adversarial test. Don't "clean up" or "modernize" past them without re-reading why.
+
+### 1. Middleware stays `middleware.ts` (Edge), not `proxy.ts`
+[middleware.ts](middleware.ts) (repo root) must keep running on the **Edge runtime** via the `middleware` file convention. **Do not rename/migrate it to Next.js 16's `proxy.ts` convention.** This was tried and reverted in this exact repo: with the current NextAuth v5 beta (`next-auth@^5.0.0-beta.31`), `proxy.ts` was silently **not registered as route-protection at all** — `/dashboard` became publicly reachable with no session (verified: unauth request returned `200` instead of a `307` to `/login`). Revisit only after confirming a `next-auth` version that documents `proxy.ts` support, and re-verify with a real unauthenticated request before trusting it.
+
+### 2. Public portal security model
+The pattern behind `/share/conversion/[token]` and `/api/public/conversion/[token]/*` is the template for any future unauthenticated surface:
+- **Tokens are bearer secrets, not "encrypted" values**: generate with `crypto.randomBytes(32)` (256-bit), store the raw token directly as a unique DB column, and treat possession of it as sole authorization. Don't reach for field-level encryption on the token — it adds nothing since only the server ever validates it; entropy + expiry + rotate-to-revoke is what actually matters.
+- **Every public route resolves `caseId`/`clientId` from the token server-side** (see `resolvePortalToken` in [src/lib/queries.ts](src/lib/queries.ts)) — **never from a client-supplied id in the request body.** This is the specific control that was adversarially tested and confirmed to block cross-case access (a presign request using another case's checklist item id was rejected with 400; a cross-case checklist-link attempt left the foreign case's row untouched).
+- **Honeypot**: public forms include an off-screen field named `website` (see `conversion-portal-view.tsx`). If it arrives non-empty, the route rejects with the same generic validation error used for real validation failures (no distinct "bot detected" message) — never skip the check and never make the rejection message identifiable as honeypot-specific.
+- **Public-mutation logic lives in the Route Handler itself, not in the shared `"use server"` `src/lib/actions.ts`.** Any file marked `"use server"` turns its exports into network-invokable Server Actions the moment they're imported into a client component — a function that trusts a caller-supplied `caseId`/`clientId` (as an unauthenticated portal submission must) must never risk being wired up that way later. Keep that class of logic in a plain route file under `src/app/api/public/**` where there is no ambiguity about the trust boundary.
+- Identity fields (name, national ID) are **read-only** in any public portal — only contact/family fields are client-editable, so a leaked link can never be used to alter the legal identity record.
+
+### 3. i18n dictionary pattern (`src/lib/i18n/`)
+Zero-dependency, plain-object dictionaries (see [src/lib/i18n/conversion-portal.ts](src/lib/i18n/conversion-portal.ts)) — no i18n library, no localized routing. Each locale is typed as `typeof he`, so TypeScript fails the build if `en`/`fr` are missing a key. **Translate dynamic, DB-sourced labels (e.g. document checklist names) by their stable enum identifier (`DocumentType`), never by matching/parsing the Hebrew string itself** — the Hebrew `displayName` from the DB remains the source of truth for `he`; `en`/`fr` are a separate lookup keyed off the enum value, so they keep working even if the Hebrew label copy is edited later.
+
+### 4. RTL Hebrew printing/PDF — no rasterization libraries
+**Do not install `jsPDF`, `html2pdf.js`, `html2canvas`, or any canvas-rasterization PDF library for Hebrew content.** They render through a re-rasterized DOM snapshot that has well-documented breakage with RTL text, Hebrew ligatures, and custom web fonts — exactly what this app is. Always use the native browser print pipeline instead: `src/lib/print.ts`'s `printSection(target)` tags `<body data-print-target>` and calls `window.print()`; `globals.css` scopes visibility to `.print-summary` / `.print-letter` (two distinct classes, not one shared class, because both regions can be mounted in the DOM simultaneously and a shared class would print them stacked on top of each other); `PrintLetterhead` supplies the branded, print-only header. A "Download PDF" button means "trigger a correctly-scoped `window.print()`," not "render to canvas and serialize a PDF client-side."
