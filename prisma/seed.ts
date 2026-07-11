@@ -70,16 +70,21 @@ async function main() {
 
   // ── Document Checklist Templates (CONVERSION) ──────────────────────────────
   const conversionDocs = [
-    { documentType: DocumentType.NATIONAL_ID,       displayName: "תעודת זהות",              isMandatory: true,  sortOrder: 1 },
-    { documentType: DocumentType.RABBI_LETTER,      displayName: "מכתב המלצה מרב",          isMandatory: true,  sortOrder: 2 },
-    { documentType: DocumentType.COMMUNITY_LETTER,  displayName: "מכתב המלצה מהקהילה",      isMandatory: true,  sortOrder: 3 },
-    { documentType: DocumentType.FAMILY_PHOTO,      displayName: "תמונה משפחתית",           isMandatory: false, sortOrder: 4 },
+    { documentType: DocumentType.NATIONAL_ID,       displayName: "תעודת זהות",              isMandatory: true,  sortOrder: 1,
+      description: "נא להעלות צילום או סריקה ברורה של תעודת הזהות, כולל הספח." },
+    { documentType: DocumentType.RABBI_LETTER,      displayName: "מכתב המלצה מרב",          isMandatory: true,  sortOrder: 2,
+      description: "נא להעלות מכתב המלצה חתום על ידי הרב המלווה, על נייר מכתבים רשמי." },
+    { documentType: DocumentType.COMMUNITY_LETTER,  displayName: "מכתב המלצה מהקהילה",      isMandatory: true,  sortOrder: 3,
+      description: "נא להעלות מכתב מהקהילה או מבית הכנסת המאשר את השתתפותך בחיי הקהילה." },
+    { documentType: DocumentType.FAMILY_PHOTO,      displayName: "תמונה משפחתית",           isMandatory: false, sortOrder: 4,
+      description: "אופציונלי: תמונה משפחתית עדכנית לצירוף לתיק." },
   ];
 
   for (const doc of conversionDocs) {
     await prisma.documentChecklistTemplate.upsert({
       where: { caseType_documentType: { caseType: CaseType.CONVERSION, documentType: doc.documentType } },
-      update: {},
+      // Backfill guidance text onto templates that pre-date the description rollout.
+      update: { description: doc.description },
       create: { caseType: CaseType.CONVERSION, ...doc },
     });
   }

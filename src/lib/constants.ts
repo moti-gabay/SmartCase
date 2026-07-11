@@ -107,6 +107,18 @@ export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   OTHER:                     "אחר",
 };
 
+export const CASE_STEP_LABELS: Record<string, string> = {
+  WELCOME:           "ברוכים הבאים",
+  PROCESS_OVERVIEW:  "סקירת התהליך",
+  WIZARD_PERSONAL:   "פרטים אישיים",
+  WIZARD_FAMILY:     "משפחה",
+  WIZARD_BACKGROUND: "רקע קהילתי",
+  PERSONAL_STORY:    "הסיפור האישי",
+  PENDING_DOCS:      "העלאת מסמכים",
+  SCHEDULE_MEETING:  "קביעת פגישה",
+  TRACKING:          "מעקב תיק",
+};
+
 export const NOTE_TYPE_LABELS: Record<string, string> = {
   INTERNAL:          "הערה פנימית",
   CALL_LOG:          "שיחת טלפון",

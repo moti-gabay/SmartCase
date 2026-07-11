@@ -6,7 +6,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/../auth";
 import { deleteObject } from "@/core/storage/s3-storage";
-import type { CaseStatus, CaseType, Priority, TaskStatus, Gender, EmploymentStatus } from "@/types";
+import { CASE_STEP_ORDER } from "@/lib/portal/journey";
+import type { CaseStatus, CaseStep, CaseType, Priority, TaskStatus, Gender, EmploymentStatus } from "@/types";
 
 // Best-effort removal of S3 objects; never let a storage error break the DB action.
 async function deleteObjectsQuiet(keys: (string | null | undefined)[]): Promise<void> {
@@ -420,6 +421,21 @@ export async function generatePortalLink(caseId: string): Promise<{ token: strin
 
   revalidatePath(`/cases/${caseId}`);
   return { token, expiresAt: expiresAt.toISOString() };
+}
+
+// Staff override for the client's portal journey step — the only way to move
+// through the staff-driven transitions (SCHEDULE_MEETING → TRACKING) until the
+// Smart Scheduling module lands, and the escape hatch to reset a client's
+// journey. Client-side advancing goes through the token-guarded public route
+// (api/public/conversion/[token]/advance), never through here.
+export async function setCasePortalStep(caseId: string, step: CaseStep) {
+  await requireUserId();
+  if (!CASE_STEP_ORDER.includes(step)) throw new Error("שלב לא תקין");
+
+  await prisma.case.update({ where: { id: caseId }, data: { portalStep: step } });
+
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
 }
 
 // NOTE: the public conversion-portal submission logic (profile + children) lives

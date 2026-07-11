@@ -50,6 +50,33 @@ export function translateChecklistLabel(locale: PortalLocale, documentType: stri
   return DOCUMENT_TYPE_TRANSLATIONS[locale][documentType] ?? dbDisplayName;
 }
 
+// Checklist item guidance text (template.description) — same pattern as the
+// labels above: Hebrew comes from the DB (source of truth), en/fr are keyed by
+// the stable DocumentType enum value, never by matching the Hebrew string.
+const DOCUMENT_TYPE_DESCRIPTIONS: Record<"en" | "fr", Record<string, string>> = {
+  en: {
+    NATIONAL_ID: "Please upload a clear photo or scan of your national ID, including the appendix.",
+    RABBI_LETTER: "Please upload a recommendation letter signed by your sponsoring rabbi, on official letterhead.",
+    COMMUNITY_LETTER: "Please upload a letter from your community or synagogue confirming your participation in community life.",
+    FAMILY_PHOTO: "Optional: a recent family photo to accompany your file.",
+  },
+  fr: {
+    NATIONAL_ID: "Veuillez téléverser une photo ou un scan lisible de votre carte d'identité, annexe comprise.",
+    RABBI_LETTER: "Veuillez téléverser une lettre de recommandation signée par votre rabbin accompagnateur, sur papier à en-tête officiel.",
+    COMMUNITY_LETTER: "Veuillez téléverser une lettre de votre communauté ou synagogue confirmant votre participation à la vie communautaire.",
+    FAMILY_PHOTO: "Facultatif : une photo de famille récente pour accompagner votre dossier.",
+  },
+};
+
+export function translateChecklistDescription(
+  locale: PortalLocale,
+  documentType: string,
+  dbDescription: string | null
+): string | null {
+  if (locale === "he") return dbDescription;
+  return DOCUMENT_TYPE_DESCRIPTIONS[locale][documentType] ?? dbDescription;
+}
+
 const he = {
   portalSubtitle: "פורטל לקוח – הליך גיור",
   footerNote: "המידע והמסמכים שתעלה כאן מועברים ישירות למשרד המטפל בתיקך.",

@@ -31,6 +31,18 @@ export type CaseType =
 
 export type Priority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 
+// Client-portal journey step (Phase 5 wizard) — order matters, see src/lib/portal/journey.ts
+export type CaseStep =
+  | "WELCOME"
+  | "PROCESS_OVERVIEW"
+  | "WIZARD_PERSONAL"
+  | "WIZARD_FAMILY"
+  | "WIZARD_BACKGROUND"
+  | "PERSONAL_STORY"
+  | "PENDING_DOCS"
+  | "SCHEDULE_MEETING"
+  | "TRACKING";
+
 export type DocumentStatus = "MISSING" | "PENDING_UPLOAD" | "UPLOADED_PENDING_REVIEW" | "APPROVED" | "REJECTED" | "EXPIRED";
 export type DocumentType =
   | "NATIONAL_ID" | "MEDICAL_REPORT" | "PSYCHIATRIC_EVALUATION"
@@ -235,6 +247,7 @@ export interface CaseDetail {
   lastContactDate?: string;
   isOverdue: boolean;
   hasMissingDocuments: boolean;
+  portalStep: CaseStep;
   createdAt: string;
   updatedAt: string;
 

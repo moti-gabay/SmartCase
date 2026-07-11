@@ -1,5 +1,6 @@
 import { cn, formatDate, formatCurrency } from "@/lib/utils";
 import { PrintLetterhead } from "@/components/print/print-letterhead";
+import { PortalStepControl } from "@/components/cases/portal-step-control";
 import { CASE_STATUS_LABELS, CASE_TYPE_LABELS } from "@/lib/constants";
 import type { CaseDetail } from "@/types";
 import {
@@ -118,6 +119,18 @@ export function CaseInfoPanel({ caseDetail }: CaseInfoPanelProps) {
         )}
         <Row icon={Stethoscope} label="רופא מטפל" value={client.treatingPhysician} />
       </Section>
+
+      {/* Journey control renders for every conversion case — the profile row is
+          created lazily on the client's first portal submit, but the journey
+          (and the staff's ability to move/reset it) starts at case creation. */}
+      {caseDetail.caseType === "CONVERSION" && (
+        <>
+          <div className="border-t border-slate-100" />
+          <Section title="מסע הלקוח בפורטל">
+            <PortalStepControl caseId={caseDetail.id} step={caseDetail.portalStep} />
+          </Section>
+        </>
+      )}
 
       {caseDetail.caseType === "CONVERSION" && caseDetail.conversionProfile && (
         <>

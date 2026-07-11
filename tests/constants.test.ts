@@ -11,7 +11,9 @@ import {
   LETTER_TYPE_LABELS,
   LETTER_TYPE_INSTRUCTIONS,
   PIPELINE_COLUMNS,
+  CASE_STEP_LABELS,
 } from "../src/lib/constants";
+import { CASE_STEP_ORDER } from "../src/lib/portal/journey";
 
 test("every pipeline column has a label, color and dot", () => {
   for (const status of PIPELINE_COLUMNS) {
@@ -48,4 +50,11 @@ test("case and document type label maps are non-empty", () => {
   assert.ok(Object.keys(CASE_TYPE_LABELS).length >= 10);
   assert.ok(DOCUMENT_TYPE_LABELS["MEDICAL_REPORT"]);
   assert.ok(DOCUMENT_TYPE_LABELS["NATIONAL_ID"]);
+});
+
+test("every portal journey step has a Hebrew label, and no orphan labels exist", () => {
+  for (const step of CASE_STEP_ORDER) {
+    assert.ok(CASE_STEP_LABELS[step], `missing label for ${step}`);
+  }
+  assert.deepEqual(Object.keys(CASE_STEP_LABELS).sort(), [...CASE_STEP_ORDER].sort());
 });

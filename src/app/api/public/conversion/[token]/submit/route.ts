@@ -26,6 +26,7 @@ const submitSchema = z.object({
   sponsoringRabbi: z.string().optional(),
   courtName: z.string().optional(),
   additionalNotes: z.string().optional(),
+  personalStory: z.string().max(20000).optional(),
   children: z.array(childSchema).max(20).optional(),
 });
 
@@ -67,6 +68,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
         sponsoringRabbi: data.sponsoringRabbi || null,
         courtName: data.courtName || null,
         additionalNotes: data.additionalNotes || null,
+        // Only touch personalStory when the payload includes it — the classic
+        // full-form submit omits it, and must not wipe a story saved earlier
+        // (it gates the PERSONAL_STORY → PENDING_DOCS journey transition).
+        ...(data.personalStory !== undefined ? { personalStory: data.personalStory || null } : {}),
         submittedAt: new Date(),
       };
 

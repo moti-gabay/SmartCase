@@ -11,6 +11,7 @@ import type {
   TaskListItem,
   UserSummary,
   CaseStatus,
+  CaseStep,
   DocumentStatus,
 } from "@/types";
 
@@ -333,6 +334,7 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
     lastContactDate: iso(c.lastContactDate) ?? undefined,
     isOverdue: c.isOverdue,
     hasMissingDocuments: c.hasMissingDocuments,
+    portalStep: c.portalStep,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
 
@@ -570,6 +572,9 @@ export interface PortalChecklistItem {
   id: string;
   documentType: string;
   displayName: string;
+  // Hebrew source of truth from DocumentChecklistTemplate.description; en/fr
+  // are translated by the DocumentType enum key in the i18n dictionary.
+  description: string | null;
   isMandatory: boolean;
   status: DocumentStatus;
 }
@@ -578,6 +583,7 @@ export interface PortalCaseView {
   id: string;
   caseNumber: string;
   status: CaseStatus;
+  portalStep: CaseStep;
   client: {
     id: string;
     fullName: string;
@@ -609,6 +615,7 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
       id: true,
       caseNumber: true,
       status: true,
+      portalStep: true,
       clientPortalTokenExpiresAt: true,
       client: {
         select: {
@@ -631,6 +638,7 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
     id: c.id,
     caseNumber: c.caseNumber,
     status: c.status,
+    portalStep: c.portalStep,
     client: {
       id: c.client.id,
       fullName: c.client.fullName,
@@ -660,6 +668,7 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
       id: item.id,
       documentType: item.template.documentType,
       displayName: item.template.displayName,
+      description: item.template.description,
       isMandatory: item.template.isMandatory,
       status: item.status,
     })),

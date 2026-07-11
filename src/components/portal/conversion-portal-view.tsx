@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn, formatDate } from "@/lib/utils";
 import type { PortalCaseView, PortalChecklistItem } from "@/lib/queries";
 import {
-  PORTAL_LOCALE_DIR, portalDict, translateChecklistLabel, type PortalLocale,
+  PORTAL_LOCALE_DIR, portalDict, translateChecklistLabel, translateChecklistDescription, type PortalLocale,
 } from "@/lib/i18n/conversion-portal";
 import { LanguageSwitcher } from "@/components/portal/language-switcher";
 import {
@@ -411,6 +411,7 @@ function ConversionPortalForm({
             const isDone = item.status !== "MISSING" && item.status !== "REJECTED" && item.status !== "PENDING_UPLOAD";
             const isUploading = uploadingId === item.id;
             const label = translateChecklistLabel(locale, item.documentType, item.displayName);
+            const description = translateChecklistDescription(locale, item.documentType, item.description);
             return (
               <div
                 key={item.id}
@@ -429,6 +430,7 @@ function ConversionPortalForm({
                       ? <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-bold text-red-500 border border-red-200">{t.mandatory}</span>
                       : <span className="rounded bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-400 border border-slate-200">{t.optional}</span>}
                   </div>
+                  {description && <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{description}</p>}
                 </div>
                 <button
                   onClick={() => triggerUpload(item.id)}
