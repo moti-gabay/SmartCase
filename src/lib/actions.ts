@@ -412,6 +412,68 @@ export async function deleteDocument(id: string) {
   revalidatePath("/documents");
 }
 
+// ─── Review document (staff approve / reject) ──────────────────────────────────
+
+const reviewDocumentSchema = z.object({
+  status: z.enum(["APPROVED", "REJECTED"]),
+  notes: z.string().optional(),
+});
+
+export async function reviewDocument(
+  documentId: string,
+  status: "APPROVED" | "REJECTED",
+  notes?: string,
+) {
+  const userId = await requireUserId();
+  const data = reviewDocumentSchema.parse({ status, notes });
+
+  // A rejection must carry a reason (fills reviewNotes, shown to the client).
+  const reason = data.notes?.trim();
+  if (data.status === "REJECTED" && !reason) throw new Error("נדרשת סיבת דחייה");
+
+  const doc = await prisma.document.findUnique({
+    where: { id: documentId },
+    select: { caseId: true, status: true },
+  });
+  if (!doc) throw new Error("המסמך לא נמצא");
+
+  // Only a document actually awaiting review can be reviewed — guards against
+  // acting on a stale/missing row.
+  if (doc.status !== "UPLOADED_PENDING_REVIEW") throw new Error("המסמך אינו ממתין לבדיקה");
+
+  await prisma.$transaction(async (tx) => {
+    await tx.document.update({
+      where: { id: documentId },
+      data: {
+        status: data.status,
+        reviewedById: userId,
+        // Clear any stale rejection note on approval.
+        reviewNotes: data.status === "REJECTED" ? reason : null,
+      },
+    });
+
+    // Sync the linked checklist item (general uploads have no link → no-op).
+    await tx.caseChecklist.updateMany({
+      where: { documentId },
+      data: { status: data.status },
+    });
+
+    // Recompute the case flag — REJECTED counts as missing, so a rejection
+    // re-flags the case exactly like a missing document.
+    const stillMissing = await tx.caseChecklist.count({
+      where: { caseId: doc.caseId, status: { in: ["MISSING", "REJECTED"] } },
+    });
+    await tx.case.update({
+      where: { id: doc.caseId },
+      data: { hasMissingDocuments: stillMissing > 0 },
+    });
+  });
+
+  revalidatePath(`/cases/${doc.caseId}`);
+  revalidatePath("/documents");
+  revalidatePath("/dashboard");
+}
+
 // ─── Case status ───────────────────────────────────────────────────────────────
 
 export async function changeCaseStatus(caseId: string, newStatus: CaseStatus, reason?: string) {

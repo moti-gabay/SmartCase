@@ -265,6 +265,11 @@ export function DocumentsBody({ t, locale, items, uploadingId, uploadError, onUp
                     : <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-400">{t.optional}</span>}
                 </div>
                 {description && <p className="mt-0.5 text-xs leading-relaxed text-slate-400">{description}</p>}
+                {item.status === "REJECTED" && item.reviewNotes && (
+                  <p className="mt-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
+                    {t.docRejectedReason} {item.reviewNotes}
+                  </p>
+                )}
               </div>
               <button
                 onClick={() => onUpload(item.id)}

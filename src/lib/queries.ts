@@ -578,6 +578,8 @@ export interface PortalChecklistItem {
   description: string | null;
   isMandatory: boolean;
   status: DocumentStatus;
+  // Staff rejection reason, surfaced to the client only when status is REJECTED.
+  reviewNotes: string | null;
 }
 
 export interface PortalCaseView {
@@ -627,7 +629,7 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
       },
       conversionProfile: { include: { children: true } },
       checklist: {
-        include: { template: true },
+        include: { template: true, document: { select: { reviewNotes: true } } },
         orderBy: { template: { sortOrder: "asc" } },
       },
     },
@@ -674,6 +676,7 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
       description: item.template.description,
       isMandatory: item.template.isMandatory,
       status: item.status,
+      reviewNotes: item.status === "REJECTED" ? (item.document?.reviewNotes ?? null) : null,
     })),
   };
 }

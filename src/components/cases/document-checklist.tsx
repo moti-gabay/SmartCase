@@ -7,7 +7,7 @@ import { DocStatusBadge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { deleteDocument } from "@/lib/actions";
+import { deleteDocument, reviewDocument } from "@/lib/actions";
 import { DOCUMENT_TYPE_LABELS } from "@/lib/constants";
 import type { ChecklistItemDetail, CaseDocument, DocumentStatus } from "@/types";
 import {
@@ -117,11 +117,17 @@ function AiValidationPanel({ validation }: {
 function ChecklistRow({
   item,
   onUploadClick,
+  onApprove,
+  onReject,
   isUploading,
+  isReviewing,
 }: {
   item: ChecklistItemDetail;
   onUploadClick: (item: ChecklistItemDetail) => void;
+  onApprove: (item: ChecklistItemDetail) => void;
+  onReject: (item: ChecklistItemDetail) => void;
   isUploading: boolean;
+  isReviewing: boolean;
 }) {
   const [expanded, setExpanded] = useState(
     item.status === "REJECTED" || (item.document?.aiValidation && !item.document.aiValidation.isValid)
@@ -214,6 +220,32 @@ function ChecklistRow({
             </Button>
           )}
 
+          {/* Staff review controls — only while the doc awaits review */}
+          {item.status === "UPLOADED_PENDING_REVIEW" && doc && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isReviewing}
+                onClick={() => onApprove(item)}
+                className="gap-1 text-xs text-emerald-600 hover:bg-emerald-50"
+              >
+                {isReviewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                אשר
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isReviewing}
+                onClick={() => onReject(item)}
+                className="gap-1 text-xs text-red-600 hover:bg-red-50"
+              >
+                <XCircle className="h-3.5 w-3.5" />
+                דחה
+              </Button>
+            </>
+          )}
+
           {/* Expand toggle (for description / AI analysis) */}
           {(item.description || doc?.aiValidation) && (
             <button
@@ -274,6 +306,10 @@ export function DocumentChecklist({ items, caseId, documents }: DocumentChecklis
   const [genType, setGenType] = useState<string>("MEDICAL_REPORT");
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deletePending, startDelete] = useTransition();
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [, startReview] = useTransition();
+  const [rejectTarget, setRejectTarget] = useState<ChecklistItemDetail | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingUpload = useRef<PendingUpload | null>(null);
 
@@ -404,6 +440,40 @@ export function DocumentChecklist({ items, caseId, documents }: DocumentChecklis
         setUploadError("מחיקת המסמך נכשלה");
       }
     });
+  };
+
+  // ── Review (approve / reject) ────────────────────────────────────────────────
+  const runReview = (item: ChecklistItemDetail, status: "APPROVED" | "REJECTED", notes?: string) => {
+    if (!item.document) return;
+    const docId = item.document.id;
+    setUploadError(null);
+    setUploadSuccess(null);
+    setReviewingId(item.id);
+    startReview(async () => {
+      try {
+        await reviewDocument(docId, status, notes);
+        setUploadSuccess(
+          status === "APPROVED"
+            ? `המסמך "${item.displayName}" אושר`
+            : `המסמך "${item.displayName}" נדחה`
+        );
+        router.refresh();
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : "פעולת הביקורת נכשלה");
+      } finally {
+        setReviewingId(null);
+      }
+    });
+  };
+
+  const handleApprove = (item: ChecklistItemDetail) => runReview(item, "APPROVED");
+  const handleReject = (item: ChecklistItemDetail) => { setRejectReason(""); setRejectTarget(item); };
+  const submitReject = () => {
+    const item = rejectTarget;
+    const reason = rejectReason.trim();
+    if (!item || !reason) return;
+    setRejectTarget(null);
+    runReview(item, "REJECTED", reason);
   };
 
   return (
@@ -551,7 +621,10 @@ export function DocumentChecklist({ items, caseId, documents }: DocumentChecklis
                   key={item.id}
                   item={item}
                   onUploadClick={handleUploadClick}
+                  onApprove={handleApprove}
+                  onReject={handleReject}
                   isUploading={uploadingId === item.id}
+                  isReviewing={reviewingId === item.id}
                 />
               ))}
           </div>
@@ -575,7 +648,10 @@ export function DocumentChecklist({ items, caseId, documents }: DocumentChecklis
                   key={item.id}
                   item={item}
                   onUploadClick={handleUploadClick}
+                  onApprove={handleApprove}
+                  onReject={handleReject}
                   isUploading={uploadingId === item.id}
+                  isReviewing={reviewingId === item.id}
                 />
               ))}
           </div>
@@ -615,6 +691,38 @@ export function DocumentChecklist({ items, caseId, documents }: DocumentChecklis
               <Button variant="outline" size="sm" onClick={() => setGenOpen(false)}>ביטול</Button>
               <Button size="sm" className="gap-1.5" onClick={handleGeneralUpload}>
                 <Upload className="h-3.5 w-3.5" /> בחר קובץ
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rejection reason modal */}
+      {rejectTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => setRejectTarget(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-slate-900">דחיית מסמך</h2>
+              <button onClick={() => setRejectTarget(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100" aria-label="סגור">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="mb-2 text-sm text-slate-600">
+              דחיית <strong>{rejectTarget.displayName}</strong>. הסיבה תוצג ללקוח כדי שיוכל להעלות מסמך מתוקן.
+            </p>
+            <label className="mb-1 block text-xs font-medium text-slate-600">סיבת הדחייה</label>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              rows={3}
+              autoFocus
+              placeholder="לדוגמה: המסמך מטושטש / חסר עמוד / פג תוקף"
+              className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setRejectTarget(null)}>ביטול</Button>
+              <Button variant="danger" size="sm" className="gap-1.5" disabled={!rejectReason.trim()} onClick={submitReject}>
+                <XCircle className="h-3.5 w-3.5" /> דחה מסמך
               </Button>
             </div>
           </div>
