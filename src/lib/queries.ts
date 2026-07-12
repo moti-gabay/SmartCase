@@ -602,6 +602,7 @@ export interface PortalCaseView {
     sponsoringRabbi?: string | null;
     courtName?: string | null;
     additionalNotes?: string | null;
+    personalStory?: string | null;
     children: { id: string; fullName: string; dateOfBirth?: string | null }[];
   } | null;
   checklist: PortalChecklistItem[];
@@ -658,6 +659,7 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
           sponsoringRabbi: c.conversionProfile.sponsoringRabbi,
           courtName: c.conversionProfile.courtName,
           additionalNotes: c.conversionProfile.additionalNotes,
+          personalStory: c.conversionProfile.personalStory,
           children: c.conversionProfile.children.map((ch) => ({
             id: ch.id,
             fullName: ch.fullName,

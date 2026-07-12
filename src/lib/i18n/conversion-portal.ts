@@ -132,6 +132,52 @@ const he = {
   fileTooLarge: "הקובץ גדול מדי (מקסימום 10MB)",
   fileTypeInvalid: "סוג קובץ לא נתמך (PDF, JPG או PNG בלבד)",
   uploadFailedFallback: "העלאת המסמך נכשלה",
+
+  // ── Wizard navigation & chrome ──
+  navStart: "התחלת התהליך",
+  navContinue: "המשך",
+  navAcknowledge: "הבנתי, נמשיך",
+  navBack: "חזרה",
+  navBusy: "שומר...",
+  progressLabel: "שלב",
+
+  welcomeHeroTitle: "ברוכים הבאים למרכז הליווי לגיור",
+  welcomeHeroBody:
+    "אנחנו כאן כדי ללוות אתכם צעד אחר צעד לאורך כל הליך הגיור. " +
+    "התהליך מחולק לשלבים קצרים וברורים — נתקדם יחד, בקצב שלכם.",
+
+  overviewTitle: "מה צפוי בהמשך",
+  overviewSubtitle: "ששת שלבי הליווי העיקריים",
+  overviewPhases: [
+    { title: "פתיחת תיק וליווי ראשוני", subtitle: "היכרות והגדרת הצרכים שלכם" },
+    { title: "איסוף פרטים ומסמכים", subtitle: "מילוי הפרטים והעלאת המסמכים הנדרשים" },
+    { title: "הכנה אישית ולימוד", subtitle: "ליווי אישי לקראת המפגש עם בית הדין" },
+    { title: "הגשה לבית הדין", subtitle: "המשרד מגיש את התיק המלא בשמכם" },
+    { title: "מפגש עם בית הדין", subtitle: "הופעה בפני הדיינים לקבלת ההחלטה" },
+    { title: "קבלת ההכרה", subtitle: "סיום ההליך וקבלת תעודת הגיור" },
+  ],
+
+  personalIntro: "נעדכן את פרטי הקשר שלכם",
+  familyIntro: "פרטי בן/בת הזוג והילדים (אם ישנם)",
+  backgroundIntro: "הרקע הקהילתי והדתי שלכם",
+  storyTitle: "הסיפור האישי שלכם",
+  storyIntro: "ספרו לנו במילים שלכם על המסע האישי שהביא אתכם עד הלום — הרקע, המניעים והדרך.",
+  storyPlaceholder: "כתבו כאן את הסיפור האישי שלכם...",
+  docsIntro: "להשלמת התיק, נא להעלות את המסמכים הבאים",
+
+  stepErrors: {
+    MISSING_CONTACT_FIELDS: "יש למלא טלפון, אימייל ועיר מגורים כדי להמשיך",
+    FAMILY_NOT_SAVED: "יש לשמור את פרטי המשפחה כדי להמשיך",
+    MISSING_BACKGROUND_FIELDS: "יש למלא קהילה ורב מלווה כדי להמשיך",
+    MISSING_PERSONAL_STORY: "יש לכתוב את הסיפור האישי כדי להמשיך",
+    MISSING_MANDATORY_DOCUMENTS: "יש להעלות את כל מסמכי החובה כדי להמשיך",
+    GENERIC: "לא ניתן להמשיך כרגע, נסו שוב מאוחר יותר",
+  },
+
+  awaitingTitle: "התיק שלכם התקדם בהצלחה 🎉",
+  awaitingBody: "קיבלנו את כל הפרטים והמסמכים. המשרד ייצור איתכם קשר בהקדם לתיאום המשך התהליך.",
+  trackingTitle: "הבקשה שלכם בטיפול",
+  trackingBody: "התיק נמצא כעת בטיפול המשרד ובבית הדין. נעדכן אתכם בכל התקדמות.",
 };
 
 const en: typeof he = {
@@ -189,6 +235,52 @@ const en: typeof he = {
   fileTooLarge: "File is too large (10MB maximum)",
   fileTypeInvalid: "Unsupported file type (PDF, JPG, or PNG only)",
   uploadFailedFallback: "Document upload failed",
+
+  // ── Wizard navigation & chrome ──
+  navStart: "Start the process",
+  navContinue: "Continue",
+  navAcknowledge: "Got it, continue",
+  navBack: "Back",
+  navBusy: "Saving...",
+  progressLabel: "Step",
+
+  welcomeHeroTitle: "Welcome to the Conversion Guidance Center",
+  welcomeHeroBody:
+    "We're here to guide you step by step through the entire conversion process. " +
+    "It's broken into short, clear stages — we'll move forward together, at your pace.",
+
+  overviewTitle: "What to expect",
+  overviewSubtitle: "The six main stages of the process",
+  overviewPhases: [
+    { title: "Case opening & first contact", subtitle: "Getting to know you and your needs" },
+    { title: "Gathering details & documents", subtitle: "Filling in details and uploading required documents" },
+    { title: "Personal preparation & study", subtitle: "Personal guidance toward the court hearing" },
+    { title: "Submission to the court", subtitle: "The office submits your complete file on your behalf" },
+    { title: "Court hearing", subtitle: "Appearing before the judges for the decision" },
+    { title: "Receiving recognition", subtitle: "Completing the process and receiving your certificate" },
+  ],
+
+  personalIntro: "Let's update your contact details",
+  familyIntro: "Spouse and children details (if any)",
+  backgroundIntro: "Your community and religious background",
+  storyTitle: "Your personal story",
+  storyIntro: "Tell us, in your own words, about the personal journey that brought you here — your background, motivations, and path.",
+  storyPlaceholder: "Write your personal story here...",
+  docsIntro: "To complete your file, please upload the following documents",
+
+  stepErrors: {
+    MISSING_CONTACT_FIELDS: "Please fill in phone, email, and city to continue",
+    FAMILY_NOT_SAVED: "Please save your family details to continue",
+    MISSING_BACKGROUND_FIELDS: "Please fill in community and sponsoring rabbi to continue",
+    MISSING_PERSONAL_STORY: "Please write your personal story to continue",
+    MISSING_MANDATORY_DOCUMENTS: "Please upload all required documents to continue",
+    GENERIC: "Cannot continue right now, please try again later",
+  },
+
+  awaitingTitle: "Your file has advanced successfully 🎉",
+  awaitingBody: "We've received all your details and documents. The office will contact you shortly to arrange the next steps.",
+  trackingTitle: "Your application is being processed",
+  trackingBody: "Your file is now being handled by the office and the court. We'll keep you updated on any progress.",
 };
 
 const fr: typeof he = {
@@ -247,6 +339,52 @@ const fr: typeof he = {
   fileTooLarge: "Le fichier est trop volumineux (10 Mo maximum)",
   fileTypeInvalid: "Type de fichier non pris en charge (PDF, JPG ou PNG uniquement)",
   uploadFailedFallback: "Échec du téléversement du document",
+
+  // ── Wizard navigation & chrome ──
+  navStart: "Commencer le processus",
+  navContinue: "Continuer",
+  navAcknowledge: "J'ai compris, continuer",
+  navBack: "Retour",
+  navBusy: "Enregistrement...",
+  progressLabel: "Étape",
+
+  welcomeHeroTitle: "Bienvenue au Centre d'accompagnement à la conversion",
+  welcomeHeroBody:
+    "Nous sommes là pour vous accompagner étape par étape tout au long du processus de conversion. " +
+    "Il est divisé en étapes courtes et claires — nous avancerons ensemble, à votre rythme.",
+
+  overviewTitle: "À quoi s'attendre",
+  overviewSubtitle: "Les six principales étapes du processus",
+  overviewPhases: [
+    { title: "Ouverture du dossier & premier contact", subtitle: "Faire connaissance et définir vos besoins" },
+    { title: "Collecte des informations & documents", subtitle: "Remplir les informations et téléverser les documents requis" },
+    { title: "Préparation personnelle & étude", subtitle: "Accompagnement personnel vers l'audience du tribunal" },
+    { title: "Soumission au tribunal", subtitle: "Le bureau soumet votre dossier complet en votre nom" },
+    { title: "Audience du tribunal", subtitle: "Comparution devant les juges pour la décision" },
+    { title: "Obtention de la reconnaissance", subtitle: "Finalisation du processus et remise du certificat" },
+  ],
+
+  personalIntro: "Mettons à jour vos coordonnées",
+  familyIntro: "Détails du conjoint et des enfants (le cas échéant)",
+  backgroundIntro: "Votre contexte communautaire et religieux",
+  storyTitle: "Votre histoire personnelle",
+  storyIntro: "Racontez-nous, avec vos propres mots, le parcours personnel qui vous a mené jusqu'ici — votre contexte, vos motivations et votre cheminement.",
+  storyPlaceholder: "Écrivez votre histoire personnelle ici...",
+  docsIntro: "Pour compléter votre dossier, veuillez téléverser les documents suivants",
+
+  stepErrors: {
+    MISSING_CONTACT_FIELDS: "Veuillez renseigner téléphone, e-mail et ville pour continuer",
+    FAMILY_NOT_SAVED: "Veuillez enregistrer vos informations familiales pour continuer",
+    MISSING_BACKGROUND_FIELDS: "Veuillez renseigner la communauté et le rabbin accompagnateur pour continuer",
+    MISSING_PERSONAL_STORY: "Veuillez rédiger votre histoire personnelle pour continuer",
+    MISSING_MANDATORY_DOCUMENTS: "Veuillez téléverser tous les documents obligatoires pour continuer",
+    GENERIC: "Impossible de continuer pour le moment, veuillez réessayer plus tard",
+  },
+
+  awaitingTitle: "Votre dossier a bien progressé 🎉",
+  awaitingBody: "Nous avons reçu toutes vos informations et documents. Le bureau vous contactera prochainement pour organiser la suite.",
+  trackingTitle: "Votre demande est en cours de traitement",
+  trackingBody: "Votre dossier est désormais pris en charge par le bureau et le tribunal. Nous vous tiendrons informé de toute avancée.",
 };
 
 export const portalDict: Record<PortalLocale, typeof he> = { he, en, fr };
