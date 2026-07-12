@@ -10,6 +10,7 @@ import type {
   CaseDetail,
   TaskListItem,
   UserSummary,
+  AdminUserRow,
   CaseStatus,
   CaseStep,
   DocumentStatus,
@@ -690,9 +691,38 @@ export async function resolvePortalToken(token: string): Promise<{ caseId: strin
 
 export async function getAgents(): Promise<UserSummary[]> {
   const rows = await prisma.user.findMany({
-    where: { isActive: true, role: { not: "CLIENT" } },
+    // Only approved staff are assignable — pending/suspended accounts must not
+    // surface as pickable agents.
+    where: { status: "APPROVED", role: { not: "CLIENT" } },
     select: { id: true, name: true, email: true, role: true, avatarUrl: true },
     orderBy: { name: "asc" },
   });
   return rows.map((r) => ({ ...r, role: r.role as UserSummary["role"] }));
+}
+
+export async function getUsersForAdmin(): Promise<AdminUserRow[]> {
+  const rows = await prisma.user.findMany({
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      role: true,
+      status: true,
+      createdAt: true,
+      _count: { select: { assignedCases: true } },
+    },
+    // Pending accounts first (need action), then most recently created.
+    orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    phone: r.phone,
+    role: r.role as AdminUserRow["role"],
+    status: r.status as AdminUserRow["status"],
+    createdAt: r.createdAt.toISOString(),
+    assignedCasesCount: r._count.assignedCases,
+  }));
 }

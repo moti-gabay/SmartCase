@@ -37,7 +37,16 @@ export default function LoginPage() {
     })
 
     if (!result || result.error) {
-      setAuthError("כתובת הדוא\"ל או הסיסמה שגויים")
+      // `code` is carried by the custom CredentialsSignin subclasses thrown in
+      // auth.ts, letting us show account-state copy distinct from bad credentials.
+      const code = (result as { code?: string } | undefined)?.code
+      setAuthError(
+        code === "pending_approval"
+          ? "החשבון שלך ממתין לאישור מנהל המערכת. תקבל גישה לאחר האישור."
+          : code === "suspended"
+          ? "החשבון שלך הושעה. לפרטים נוספים פנה למנהל המערכת."
+          : "כתובת הדוא\"ל או הסיסמה שגויים"
+      )
       return
     }
 

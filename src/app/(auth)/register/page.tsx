@@ -1,12 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { signIn } from "next-auth/react"
 import { Eye, EyeOff, UserPlus, AlertCircle, CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -25,7 +23,6 @@ const schema = z
 type FormValues = z.infer<typeof schema>
 
 export default function RegisterPage() {
-  const router = useRouter()
   const [showPassword,  setShowPassword]  = useState(false)
   const [showConfirm,   setShowConfirm]   = useState(false)
   const [serverError,   setServerError]   = useState<string | null>(null)
@@ -51,21 +48,9 @@ export default function RegisterPage() {
       return
     }
 
-    // Auto sign-in after successful registration
+    // New accounts default to PENDING_APPROVAL and cannot log in until an admin
+    // approves them — so we do NOT auto sign-in; we show a pending-approval state.
     setSuccess(true)
-    const result = await signIn("credentials", {
-      email:    data.email,
-      password: data.password,
-      redirect: false,
-    })
-
-    if (result?.ok) {
-      router.replace("/dashboard")
-      router.refresh()
-    } else {
-      // Registration OK but auto-login failed — send to login page
-      router.replace("/login")
-    }
   }
 
   return (
@@ -82,11 +67,14 @@ export default function RegisterPage() {
       <div className="rounded-2xl bg-white p-8 shadow-2xl">
         <h2 className="mb-6 text-xl font-semibold text-slate-900">יצירת חשבון חדש</h2>
 
-        {/* Success banner */}
+        {/* Success banner — account created, awaiting admin approval */}
         {success && (
-          <div className="mb-5 flex items-center gap-2.5 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">
-            <CheckCircle2 className="h-4 w-4 shrink-0" />
-            <span>החשבון נוצר בהצלחה! מעביר אותך...</span>
+          <div className="mb-5 flex items-start gap-2.5 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              החשבון נוצר בהצלחה וממתין לאישור מנהל המערכת. תוכל להתחבר לאחר האישור.{" "}
+              <Link href="/login" className="font-medium underline">מעבר לכניסה</Link>
+            </span>
           </div>
         )}
 

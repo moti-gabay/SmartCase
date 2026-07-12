@@ -1,5 +1,32 @@
 // Hebrew labels for all enums used throughout the UI
 
+// ─── User role & account status (admin user management) ───────────────────────
+
+export const USER_ROLE_LABELS: Record<string, string> = {
+  ADMIN:      "מנהל מערכת",
+  SUPERVISOR: "מפקח",
+  AGENT:      "נציג",
+  CLIENT:     "לקוח",
+};
+
+export const USER_STATUS_LABELS: Record<string, string> = {
+  PENDING_APPROVAL: "ממתין לאישור",
+  APPROVED:         "מאושר",
+  SUSPENDED:        "מושעה",
+};
+
+export const USER_STATUS_COLORS: Record<string, string> = {
+  PENDING_APPROVAL: "bg-amber-100 text-amber-700 border-amber-200",
+  APPROVED:         "bg-emerald-100 text-emerald-700 border-emerald-200",
+  SUSPENDED:        "bg-red-100 text-red-700 border-red-200",
+};
+
+export const USER_STATUS_DOT: Record<string, string> = {
+  PENDING_APPROVAL: "bg-amber-500",
+  APPROVED:         "bg-emerald-500",
+  SUSPENDED:        "bg-red-500",
+};
+
 export const CASE_STATUS_LABELS: Record<string, string> = {
   NEW_INTAKE:           "קליטה חדשה",
   GATHERING_DOCUMENTS:  "איסוף מסמכים",

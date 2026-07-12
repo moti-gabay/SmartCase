@@ -15,6 +15,7 @@ import {
   LogOut,
   Scale,
   ChevronLeft,
+  ShieldCheck,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -25,6 +26,9 @@ const NAV_ITEMS = [
   { href: "/documents",  label: "מסמכים",      icon: FileText },
   { href: "/ai-tools",   label: "כלי AI",      icon: Sparkles },
 ] as const;
+
+// Admin-only nav entry, rendered conditionally on session role.
+const ADMIN_ITEM = { href: "/admin/users", label: "ניהול משתמשים", icon: ShieldCheck } as const;
 
 const BOTTOM_ITEMS = [
   { href: "/settings", label: "הגדרות", icon: Settings },
@@ -42,6 +46,7 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
 
   const userName    = session?.user?.name  ?? "משתמש";
   const userEmail   = session?.user?.email ?? "";
+  const isAdmin     = session?.user?.role === "ADMIN";
   const initials    = userName.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 
   return (
@@ -99,6 +104,26 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
             </Link>
           );
         })}
+
+        {isAdmin && (() => {
+          const { href, label, icon: Icon } = ADMIN_ITEM;
+          const isActive = pathname === href || pathname.startsWith(href + "/");
+          return (
+            <Link
+              href={href}
+              title={isCollapsed ? label : undefined}
+              className={cn(
+                "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                isActive
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-indigo-200 hover:bg-white/10 hover:text-white"
+              )}
+            >
+              <Icon className="h-5 w-5 shrink-0" />
+              {!isCollapsed && <span className="truncate">{label}</span>}
+            </Link>
+          );
+        })()}
       </nav>
 
       {/* Bottom section */}

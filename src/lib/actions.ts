@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/../auth";
 import { deleteObject } from "@/core/storage/s3-storage";
 import { CASE_STEP_ORDER } from "@/lib/portal/journey";
-import type { CaseStatus, CaseStep, CaseType, Priority, TaskStatus, Gender, EmploymentStatus } from "@/types";
+import type { CaseStatus, CaseStep, CaseType, Priority, TaskStatus, Gender, EmploymentStatus, UserRole, UserStatus } from "@/types";
 
 // Best-effort removal of S3 objects; never let a storage error break the DB action.
 async function deleteObjectsQuiet(keys: (string | null | undefined)[]): Promise<void> {
@@ -22,6 +22,13 @@ async function requireUserId(): Promise<string> {
   const session = await auth();
   const id = session?.user?.id;
   if (!id) throw new Error("Unauthorized");
+  return id;
+}
+
+async function requireAdmin(): Promise<string> {
+  const session = await auth();
+  const id = session?.user?.id;
+  if (!id || session.user.role !== "ADMIN") throw new Error("Unauthorized");
   return id;
 }
 
@@ -475,6 +482,152 @@ export async function setCasePortalStep(caseId: string, step: CaseStep) {
 
   revalidatePath(`/cases/${caseId}`);
   revalidatePath("/cases");
+}
+
+// ─── Admin: user management ──────────────────────────────────────────────────
+// Every export here is an authenticated, ADMIN-guarded Server Action. Unlike the
+// public portal (kept out of this file on purpose), these legitimately mutate
+// other users' records — so the guard is `requireAdmin`, not a caller-supplied id.
+
+const STAFF_ROLES = ["ADMIN", "SUPERVISOR", "AGENT"] as const;
+
+const adminUpdateUserSchema = z.object({
+  name:   z.string().min(2).optional(),
+  phone:  z.string().optional(),
+  role:   z.enum(STAFF_ROLES).optional(),
+  status: z.enum(["PENDING_APPROVAL", "APPROVED", "SUSPENDED"]).optional(),
+});
+
+export type AdminUpdateUserInput = z.infer<typeof adminUpdateUserSchema>;
+
+export async function adminUpdateUser(targetId: string, input: AdminUpdateUserInput) {
+  const adminId = await requireAdmin();
+  const data = adminUpdateUserSchema.parse(input);
+
+  const target = await prisma.user.findUnique({
+    where: { id: targetId },
+    select: { role: true, status: true },
+  });
+  if (!target) throw new Error("המשתמש לא נמצא");
+
+  const nextRole   = data.role   ?? target.role;
+  const nextStatus = data.status ?? target.status;
+
+  // Does this change strip an approved admin of their admin access?
+  const losesAdmin =
+    target.role === "ADMIN" &&
+    target.status === "APPROVED" &&
+    (nextRole !== "ADMIN" || nextStatus !== "APPROVED");
+
+  // Self-lockout guard: an admin cannot revoke their own admin access.
+  if (targetId === adminId && losesAdmin) {
+    throw new Error("לא ניתן לבטל את הרשאות המנהל של עצמך");
+  }
+
+  // Last-admin guard: never leave the system with zero approved admins.
+  if (losesAdmin) {
+    const otherAdmins = await prisma.user.count({
+      where: { role: "ADMIN", status: "APPROVED", id: { not: targetId } },
+    });
+    if (otherAdmins === 0) throw new Error("לא ניתן להסיר את מנהל המערכת המאושר האחרון");
+  }
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: targetId },
+      data: {
+        ...(data.name   !== undefined ? { name: data.name } : {}),
+        ...(data.phone  !== undefined ? { phone: data.phone || null } : {}),
+        ...(data.role   !== undefined ? { role: data.role as UserRole } : {}),
+        ...(data.status !== undefined ? { status: data.status as UserStatus } : {}),
+      },
+    }),
+    // Compliance trail — status/role changes on user accounts are sensitive.
+    prisma.auditLog.create({
+      data: {
+        userId: adminId,
+        action: "USER_UPDATE",
+        entityType: "User",
+        entityId: targetId,
+        metadata: {
+          before: { role: target.role, status: target.status },
+          after:  { role: nextRole, status: nextStatus },
+        },
+      },
+    }),
+  ]);
+
+  revalidatePath("/admin/users");
+}
+
+export async function approveUser(targetId: string) {
+  return adminUpdateUser(targetId, { status: "APPROVED" });
+}
+
+export async function suspendUser(targetId: string) {
+  return adminUpdateUser(targetId, { status: "SUSPENDED" });
+}
+
+// Hard-delete a user. Only "clean" accounts (no authored records) are deletable —
+// SUSPENDED is the soft-delete for anyone with activity. This exists mainly to
+// purge rejected/spam PENDING_APPROVAL registrations.
+export async function adminDeleteUser(targetId: string) {
+  const adminId = await requireAdmin();
+
+  // Self-lockout guard.
+  if (targetId === adminId) throw new Error("לא ניתן למחוק את המשתמש שלך");
+
+  const target = await prisma.user.findUnique({
+    where: { id: targetId },
+    select: { role: true, status: true },
+  });
+  if (!target) throw new Error("המשתמש לא נמצא");
+
+  // Last-admin guard: never delete the final approved admin.
+  if (target.role === "ADMIN" && target.status === "APPROVED") {
+    const otherAdmins = await prisma.user.count({
+      where: { role: "ADMIN", status: "APPROVED", id: { not: targetId } },
+    });
+    if (otherAdmins === 0) throw new Error("לא ניתן למחוק את מנהל המערכת המאושר האחרון");
+  }
+
+  // Referential-integrity guard: these relations are required FKs (onDelete:
+  // Restrict), so a user who authored any of them cannot be hard-deleted.
+  // Block early with a clear message rather than surfacing a raw FK violation.
+  const [cases, notes, tasks, history] = await Promise.all([
+    prisma.case.count({ where: { createdById: targetId } }),
+    prisma.note.count({ where: { authorId: targetId } }),
+    prisma.task.count({ where: { createdById: targetId } }),
+    prisma.caseStatusHistory.count({ where: { changedById: targetId } }),
+  ]);
+  if (cases + notes + tasks + history > 0) {
+    throw new Error("לא ניתן למחוק משתמש עם היסטוריית פעילות במערכת (תיקים, משימות, הערות או שינויי סטטוס). יש להשעות אותו במקום זאת.");
+  }
+
+  try {
+    await prisma.$transaction([
+      prisma.user.delete({ where: { id: targetId } }),
+      // Audit row references the acting admin (not the deleted user), so it
+      // survives the deletion and keeps the trail immutable.
+      prisma.auditLog.create({
+        data: {
+          userId: adminId,
+          action: "USER_DELETE",
+          entityType: "User",
+          entityId: targetId,
+          metadata: { role: target.role, status: target.status },
+        },
+      }),
+    ]);
+  } catch (e) {
+    // Safety net in case an optional relation's FK isn't SetNull as expected.
+    if ((e as { code?: string })?.code === "P2003") {
+      throw new Error("לא ניתן למחוק משתמש המשויך לרשומות במערכת. יש להשעות אותו במקום זאת.");
+    }
+    throw e;
+  }
+
+  revalidatePath("/admin/users");
 }
 
 // NOTE: the public conversion-portal submission logic (profile + children) lives

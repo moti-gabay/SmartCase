@@ -1,6 +1,7 @@
 // Shared TypeScript types for the SmartCase application
 
 export type UserRole = "ADMIN" | "SUPERVISOR" | "AGENT";
+export type UserStatus = "PENDING_APPROVAL" | "APPROVED" | "SUSPENDED";
 export type Gender = "MALE" | "FEMALE" | "OTHER";
 export type EmploymentStatus = "EMPLOYED" | "SELF_EMPLOYED" | "UNEMPLOYED" | "RETIRED" | "STUDENT" | "UNABLE_TO_WORK";
 
@@ -77,6 +78,18 @@ export interface UserSummary {
   email: string;
   role: UserRole;
   avatarUrl?: string | null;
+}
+
+// Row model for the admin user-management table.
+export interface AdminUserRow {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string | null;
+  role: UserRole;
+  status: UserStatus;
+  createdAt: string;
+  assignedCasesCount: number;
 }
 
 export interface ClientSummary {

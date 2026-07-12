@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { PrismaClient, UserRole, CaseType, CaseStatus, Priority, DocumentType, Gender, EmploymentStatus } from "../src/generated/prisma/client";
+import { PrismaClient, UserRole, UserStatus, CaseType, CaseStatus, Priority, DocumentType, Gender, EmploymentStatus } from "../src/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
 
@@ -16,34 +16,37 @@ async function main() {
 
   const admin = await prisma.user.upsert({
     where: { email: "admin@smartcase.co.il" },
-    update: {},
+    update: { status: UserStatus.APPROVED },
     create: {
       name: "מנהל מערכת",
       email: "admin@smartcase.co.il",
       passwordHash,
       role: UserRole.ADMIN,
+      status: UserStatus.APPROVED,
     },
   });
 
   const agent1 = await prisma.user.upsert({
     where: { email: "magi@smartcase.co.il" },
-    update: {},
+    update: { status: UserStatus.APPROVED },
     create: {
       name: "מגי לוי",
       email: "magi@smartcase.co.il",
       passwordHash,
       role: UserRole.AGENT,
+      status: UserStatus.APPROVED,
     },
   });
 
   const agent2 = await prisma.user.upsert({
     where: { email: "dana@smartcase.co.il" },
-    update: {},
+    update: { status: UserStatus.APPROVED },
     create: {
       name: "דנה ברק",
       email: "dana@smartcase.co.il",
       passwordHash,
       role: UserRole.AGENT,
+      status: UserStatus.APPROVED,
     },
   });
 

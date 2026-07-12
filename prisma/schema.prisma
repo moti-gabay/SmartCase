@@ -19,6 +19,16 @@ enum UserRole {
   CLIENT
 }
 
+// Account lifecycle for staff/agents. Source of truth for login authorization —
+// see the `authorize`/`jwt` gate in auth.ts. New self-registrations default to
+// PENDING_APPROVAL until an admin approves them. Supersedes the legacy `isActive`
+// boolean (kept temporarily for backward compat, no longer read by auth).
+enum UserStatus {
+  PENDING_APPROVAL
+  APPROVED
+  SUSPENDED
+}
+
 enum CaseStatus {
   NEW_INTAKE
   GATHERING_DOCUMENTS
@@ -149,8 +159,9 @@ model User {
   name         String
   email        String   @unique
   passwordHash String
-  role         UserRole @default(AGENT)
-  isActive     Boolean  @default(true)
+  role         UserRole   @default(AGENT)
+  status       UserStatus @default(PENDING_APPROVAL)
+  isActive     Boolean    @default(true)
   avatarUrl    String?
   phone        String?
   createdAt    DateTime @default(now())
@@ -167,6 +178,7 @@ model User {
   auditLogs      AuditLog[]
   generatedLetters GeneratedLetter[] @relation("LetterAuthor")
 
+  @@index([status])
   @@map("users")
 }
 
