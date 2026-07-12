@@ -233,6 +233,45 @@ const updateClientSchema = z.object({
 
 export type UpdateClientInput = z.infer<typeof updateClientSchema>;
 
+export async function createClient(input: UpdateClientInput): Promise<{ id: string }> {
+  await requireUserId();
+  const data = updateClientSchema.parse(input);
+
+  const exists = await prisma.client.findUnique({ where: { nationalId: data.nationalId }, select: { id: true } });
+  if (exists) throw new Error("לקוח עם תעודת זהות זו כבר קיים במערכת");
+
+  const created = await prisma.client.create({
+    data: {
+      fullName: data.fullName,
+      nationalId: data.nationalId,
+      dateOfBirth: new Date(data.dateOfBirth),
+      gender: data.gender as Gender,
+      phone: data.phone,
+      email: data.email || null,
+      addressStreet: data.addressStreet || null,
+      addressCity: data.addressCity || null,
+      addressZip: data.addressZip || null,
+      employmentStatus: data.employmentStatus as EmploymentStatus,
+      employer: data.employer || null,
+      monthlyIncome: data.monthlyIncome ?? null,
+      spouseIncome: data.spouseIncome ?? null,
+      spouseName: data.spouseName || null,
+      primaryCondition: data.primaryCondition || null,
+      icdCode: data.icdCode || null,
+      recognizedPercentage: data.recognizedPercentage ?? null,
+      diagnosisDate: data.diagnosisDate ? new Date(data.diagnosisDate) : null,
+      treatingPhysician: data.treatingPhysician || null,
+      internalNotes: data.internalNotes || null,
+      isActive: data.isActive ?? true,
+    },
+    select: { id: true },
+  });
+
+  revalidatePath("/clients");
+  revalidatePath("/dashboard");
+  return { id: created.id };
+}
+
 export async function updateClient(id: string, input: UpdateClientInput) {
   await requireUserId();
   const data = updateClientSchema.parse(input);

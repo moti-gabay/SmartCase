@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useClientFilters } from "@/hooks/use-client-filters";
 import { FilterToolbar } from "@/components/clients/filter-toolbar";
 import { ClientTable } from "@/components/clients/client-table";
@@ -53,6 +54,7 @@ interface ClientsViewProps {
 }
 
 export function ClientsView({ clients, cities }: ClientsViewProps) {
+  const router = useRouter();
   const [view, setView] = useState<"table" | "grid">("table");
 
   const {
@@ -83,7 +85,7 @@ export function ClientsView({ clients, cities }: ClientsViewProps) {
             view={view}
             onViewChange={setView}
             totalResults={filtered.length}
-            onNewClient={() => {/* TODO: open new client modal/page */}}
+            onNewClient={() => router.push("/clients/new")}
           />
 
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
