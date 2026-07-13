@@ -149,6 +149,43 @@ ${input.context ? `\nהקשר, נסיבות ונימוקים שסיפק היוע
   return stripMarkdown(response.text ?? "");
 }
 
+// ── Call Summary (raw conversation notes → structured Hebrew summary) ──────────
+
+export async function summarizeCallHebrew(rawInput: string): Promise<string> {
+  const ai = getClient();
+
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: `אתה עוזר תיעוד מקצועי במשרד ייעוץ המטפל בתביעות ומקרים בירוקרטיים.
+לפניך רישום גולמי של שיחה עם לקוח (או תמלול). סכם אותו לתיעוד רשמי בתיק.
+
+הרישום הגולמי:
+"""
+${rawInput}
+"""
+
+החזר סיכום תמציתי ומובנה בעברית, במבנה המדויק הבא ובדיוק שלוש הכותרות הבאות, כל אחת בשורה נפרדת:
+
+נקודות מפתח:
+- ...
+
+החלטות:
+- ...
+
+משימות להמשך:
+- ...
+
+כללים מחייבים:
+- הסתמך אך ורק על המידע שברישום הגולמי. אין להמציא פרטים, שמות, תאריכים או סכומים.
+- אם אין תוכן לאחת הכותרות, כתוב "אין" בשורה תחתיה.
+- כתוב בגוף שלישי, בשפה עניינית ותמציתית, ללא פנייה ישירה ללקוח.
+- החזר טקסט רגיל בלבד, ללא כל סימוני עיצוב או Markdown. אין להשתמש ב-** (הדגשה), ב-## (כותרות), ב--- (קווים מפרידים) או בכל תגית עיצוב אחרת.`,
+    config: { maxOutputTokens: 1024 },
+  });
+
+  return stripMarkdown(response.text ?? "");
+}
+
 // ── Letter Refiner (chat-style improvement) ─────────────────────────────────────
 
 export async function refineHebrewLetter(currentLetter: string, feedback: string): Promise<string> {

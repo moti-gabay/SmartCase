@@ -5,6 +5,7 @@ import { CaseHeader } from "@/components/cases/case-header";
 import { CaseInfoPanel } from "@/components/cases/case-info-panel";
 import { DocumentChecklist } from "@/components/cases/document-checklist";
 import { ActivityTimeline } from "@/components/cases/activity-timeline";
+import { AiSummaryModal } from "@/components/cases/ai-summary-modal";
 import { TasksPanel } from "@/components/cases/tasks-panel";
 import { changeCaseStatus } from "@/lib/actions";
 import { LetterGenerator } from "@/components/ai/letter-generator";
@@ -24,6 +25,7 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
 export function CaseDetailView({ caseDetail }: { caseDetail: CaseDetail }) {
   const [caseData, setCaseData] = useState(caseDetail);
   const [activeTab, setActiveTab] = useState<TabId>("documents");
+  const [aiSummaryOpen, setAiSummaryOpen] = useState(false);
   const [, startTransition] = useTransition();
 
   const checklistProgress = useMemo(() => ({
@@ -114,11 +116,22 @@ export function CaseDetailView({ caseDetail }: { caseDetail: CaseDetail }) {
             )}
 
             {activeTab === "activity" && (
-              <ActivityTimeline
-                notes={caseData.notes}
-                statusHistory={caseData.statusHistory}
-                activities={caseData.activities}
-              />
+              <div className="flex flex-col gap-3">
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => setAiSummaryOpen(true)}
+                    className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100 transition-colors"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    סיכום שיחה חכם
+                  </button>
+                </div>
+                <ActivityTimeline
+                  notes={caseData.notes}
+                  statusHistory={caseData.statusHistory}
+                  activities={caseData.activities}
+                />
+              </div>
             )}
 
             {activeTab === "tasks" && <TasksPanel tasks={caseData.tasks} />}
@@ -129,6 +142,12 @@ export function CaseDetailView({ caseDetail }: { caseDetail: CaseDetail }) {
           </div>
         </div>
       </div>
+
+      <AiSummaryModal
+        caseId={caseData.id}
+        open={aiSummaryOpen}
+        onClose={() => setAiSummaryOpen(false)}
+      />
     </div>
   );
 }

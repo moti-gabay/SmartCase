@@ -3,7 +3,7 @@ import type { NoteDetail, StatusHistoryEntry, NoteType, CaseActivityEntry, Activ
 import { CASE_STATUS_LABELS, CASE_STATUS_DOT, NOTE_TYPE_LABELS } from "@/lib/constants";
 import {
   Phone, Mail, Users, Building2, StickyNote, Cpu, ArrowRight, Lock,
-  FilePlus2, Upload, CheckCircle2, XCircle, Milestone,
+  FilePlus2, Upload, CheckCircle2, XCircle, Milestone, Sparkles,
 } from "lucide-react";
 
 // ─── Note type icons ──────────────────────────────────────────────────────────
@@ -43,6 +43,7 @@ const ACTIVITY_ICONS: Record<ActivityType, React.ElementType> = {
   DOCUMENT_APPROVED: CheckCircle2,
   DOCUMENT_REJECTED: XCircle,
   STEP_CHANGED:      Milestone,
+  AI_CALL_SUMMARY:   Sparkles,
 };
 
 const ACTIVITY_ICON_BG: Record<ActivityType, string> = {
@@ -51,6 +52,7 @@ const ACTIVITY_ICON_BG: Record<ActivityType, string> = {
   DOCUMENT_APPROVED: "bg-emerald-100 text-emerald-600",
   DOCUMENT_REJECTED: "bg-red-100 text-red-600",
   STEP_CHANGED:      "bg-violet-100 text-violet-600",
+  AI_CALL_SUMMARY:   "bg-amber-100 text-amber-600",
 };
 
 // ─── Combined timeline entry type ─────────────────────────────────────────────
@@ -136,11 +138,11 @@ function StatusChangeCard({ entry }: { entry: StatusHistoryEntry }) {
 function ActivityCard({ activity }: { activity: CaseActivityEntry }) {
   const Icon = ACTIVITY_ICONS[activity.type];
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-      <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", ACTIVITY_ICON_BG[activity.type])}>
+    <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+      <span className={cn("mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", ACTIVITY_ICON_BG[activity.type])}>
         <Icon className="h-3.5 w-3.5" />
       </span>
-      <p className="flex-1 min-w-0 text-sm text-slate-700">{activity.description}</p>
+      <p className="flex-1 min-w-0 whitespace-pre-line text-sm leading-relaxed text-slate-700">{activity.description}</p>
       <div className="shrink-0 text-left">
         {activity.userName && <p className="text-[11px] text-slate-500">{activity.userName}</p>}
         <p className="text-[11px] text-slate-400">{timeAgo(activity.createdAt)}</p>

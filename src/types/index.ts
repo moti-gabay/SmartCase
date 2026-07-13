@@ -248,7 +248,8 @@ export type ActivityType =
   | "DOCUMENT_UPLOADED"
   | "DOCUMENT_APPROVED"
   | "DOCUMENT_REJECTED"
-  | "STEP_CHANGED";
+  | "STEP_CHANGED"
+  | "AI_CALL_SUMMARY";
 
 export interface CaseActivityEntry {
   id: string;

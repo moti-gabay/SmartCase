@@ -145,6 +145,7 @@ enum ActivityType {
   DOCUMENT_APPROVED
   DOCUMENT_REJECTED
   STEP_CHANGED
+  AI_CALL_SUMMARY
 }
 
 // Client-portal journey state machine (Phase 5 wizard). Ordered; transitions are
