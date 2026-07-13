@@ -1,7 +1,10 @@
 import { cn, timeAgo, formatDate } from "@/lib/utils";
-import type { NoteDetail, StatusHistoryEntry, NoteType } from "@/types";
+import type { NoteDetail, StatusHistoryEntry, NoteType, CaseActivityEntry, ActivityType } from "@/types";
 import { CASE_STATUS_LABELS, CASE_STATUS_DOT, NOTE_TYPE_LABELS } from "@/lib/constants";
-import { Phone, Mail, Users, Building2, StickyNote, Cpu, ArrowRight, Lock } from "lucide-react";
+import {
+  Phone, Mail, Users, Building2, StickyNote, Cpu, ArrowRight, Lock,
+  FilePlus2, Upload, CheckCircle2, XCircle, Milestone,
+} from "lucide-react";
 
 // ─── Note type icons ──────────────────────────────────────────────────────────
 
@@ -32,11 +35,30 @@ const NOTE_ICON_BG: Record<NoteType, string> = {
   SYSTEM:            "bg-slate-100 text-slate-500",
 };
 
+// ─── Activity type icons / colors (Smart Activity Timeline) ───────────────────
+
+const ACTIVITY_ICONS: Record<ActivityType, React.ElementType> = {
+  CASE_CREATED:      FilePlus2,
+  DOCUMENT_UPLOADED: Upload,
+  DOCUMENT_APPROVED: CheckCircle2,
+  DOCUMENT_REJECTED: XCircle,
+  STEP_CHANGED:      Milestone,
+};
+
+const ACTIVITY_ICON_BG: Record<ActivityType, string> = {
+  CASE_CREATED:      "bg-indigo-100 text-indigo-600",
+  DOCUMENT_UPLOADED: "bg-blue-100 text-blue-600",
+  DOCUMENT_APPROVED: "bg-emerald-100 text-emerald-600",
+  DOCUMENT_REJECTED: "bg-red-100 text-red-600",
+  STEP_CHANGED:      "bg-violet-100 text-violet-600",
+};
+
 // ─── Combined timeline entry type ─────────────────────────────────────────────
 
 type TimelineEntry =
   | { kind: "note"; data: NoteDetail; date: string }
-  | { kind: "status"; data: StatusHistoryEntry; date: string };
+  | { kind: "status"; data: StatusHistoryEntry; date: string }
+  | { kind: "activity"; data: CaseActivityEntry; date: string };
 
 // ─── Note card ────────────────────────────────────────────────────────────────
 
@@ -109,17 +131,37 @@ function StatusChangeCard({ entry }: { entry: StatusHistoryEntry }) {
   );
 }
 
+// ─── System activity card (Smart Activity Timeline) ───────────────────────────
+
+function ActivityCard({ activity }: { activity: CaseActivityEntry }) {
+  const Icon = ACTIVITY_ICONS[activity.type];
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+      <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", ACTIVITY_ICON_BG[activity.type])}>
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+      <p className="flex-1 min-w-0 text-sm text-slate-700">{activity.description}</p>
+      <div className="shrink-0 text-left">
+        {activity.userName && <p className="text-[11px] text-slate-500">{activity.userName}</p>}
+        <p className="text-[11px] text-slate-400">{timeAgo(activity.createdAt)}</p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ────────────────────────────────────────────────────────────
 
 interface ActivityTimelineProps {
   notes: NoteDetail[];
   statusHistory: StatusHistoryEntry[];
+  activities?: CaseActivityEntry[];
 }
 
-export function ActivityTimeline({ notes, statusHistory }: ActivityTimelineProps) {
+export function ActivityTimeline({ notes, statusHistory, activities = [] }: ActivityTimelineProps) {
   const entries: TimelineEntry[] = [
     ...notes.map((n) => ({ kind: "note" as const, data: n, date: n.createdAt })),
     ...statusHistory.map((s) => ({ kind: "status" as const, data: s, date: s.createdAt })),
+    ...activities.map((a) => ({ kind: "activity" as const, data: a, date: a.createdAt })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   return (
@@ -155,11 +197,11 @@ export function ActivityTimeline({ notes, statusHistory }: ActivityTimelineProps
 
       {/* Timeline entries */}
       <div className="flex flex-col gap-2.5">
-        {entries.map((entry) =>
-          entry.kind === "note"
-            ? <NoteCard key={entry.data.id} note={entry.data} />
-            : <StatusChangeCard key={entry.data.id} entry={entry.data} />
-        )}
+        {entries.map((entry) => {
+          if (entry.kind === "note")   return <NoteCard key={entry.data.id} note={entry.data} />;
+          if (entry.kind === "status") return <StatusChangeCard key={entry.data.id} entry={entry.data} />;
+          return <ActivityCard key={entry.data.id} activity={entry.data} />;
+        })}
       </div>
     </div>
   );

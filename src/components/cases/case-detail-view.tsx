@@ -114,7 +114,11 @@ export function CaseDetailView({ caseDetail }: { caseDetail: CaseDetail }) {
             )}
 
             {activeTab === "activity" && (
-              <ActivityTimeline notes={caseData.notes} statusHistory={caseData.statusHistory} />
+              <ActivityTimeline
+                notes={caseData.notes}
+                statusHistory={caseData.statusHistory}
+                activities={caseData.activities}
+              />
             )}
 
             {activeTab === "tasks" && <TasksPanel tasks={caseData.tasks} />}

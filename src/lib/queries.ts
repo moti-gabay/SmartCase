@@ -313,6 +313,7 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
       notes: { include: { author: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
       tasks: { include: { assignedTo: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
       statusHistory: { include: { changedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
+      activities: { include: { user: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
       conversionProfile: { include: { children: true } },
     },
   });
@@ -436,6 +437,14 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
       changedByName: s.changedBy.name,
       reason: s.reason ?? undefined,
       createdAt: s.createdAt.toISOString(),
+    })),
+
+    activities: c.activities.map((a) => ({
+      id: a.id,
+      type: a.type,
+      description: a.description,
+      userName: a.user?.name ?? null,
+      createdAt: a.createdAt.toISOString(),
     })),
 
     conversionProfile: c.conversionProfile

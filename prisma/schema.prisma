@@ -137,6 +137,16 @@ enum LetterType {
   OTHER
 }
 
+// Structured, append-only activity feed for a case (Smart Activity Timeline).
+// Written by logCaseActivity() inside the mutating action's own transaction.
+enum ActivityType {
+  CASE_CREATED
+  DOCUMENT_UPLOADED
+  DOCUMENT_APPROVED
+  DOCUMENT_REJECTED
+  STEP_CHANGED
+}
+
 // Client-portal journey state machine (Phase 5 wizard). Ordered; transitions are
 // validated server-side in src/lib/portal/journey.ts — the client can never name
 // a target step, only request "advance" and the server verifies completion.
@@ -177,6 +187,7 @@ model User {
   reviewedDocs   Document[]          @relation("DocumentReviewer")
   auditLogs      AuditLog[]
   generatedLetters GeneratedLetter[] @relation("LetterAuthor")
+  activities     CaseActivity[]
 
   @@index([status])
   @@map("users")
@@ -264,6 +275,7 @@ model Case {
   checklist         CaseChecklist[]
   letters           GeneratedLetter[]
   conversionProfile ConversionProfile?
+  activities        CaseActivity[]
 
   @@index([clientId])
   @@index([assignedAgentId])
@@ -424,6 +436,24 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([userId])
   @@map("audit_logs")
+}
+
+// ─── Case Activity (Smart Activity Timeline) ──────────────────────────────────
+
+model CaseActivity {
+  id          String       @id @default(cuid())
+  caseId      String
+  userId      String?
+  type        ActivityType
+  description String
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+
+  case Case  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([caseId])
+  @@map("case_activities")
 }
 
 // ─── Generated Letter (AI drafts) ───────────────────────────────────────────────

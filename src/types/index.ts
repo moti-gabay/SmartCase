@@ -243,6 +243,21 @@ export interface StatusHistoryEntry {
   createdAt: string;
 }
 
+export type ActivityType =
+  | "CASE_CREATED"
+  | "DOCUMENT_UPLOADED"
+  | "DOCUMENT_APPROVED"
+  | "DOCUMENT_REJECTED"
+  | "STEP_CHANGED";
+
+export interface CaseActivityEntry {
+  id: string;
+  type: ActivityType;
+  description: string;
+  userName?: string | null;
+  createdAt: string;
+}
+
 export interface CaseDetail {
   id: string;
   caseNumber: string;
@@ -293,6 +308,7 @@ export interface CaseDetail {
   notes: NoteDetail[];
   tasks: TaskDetail[];
   statusHistory: StatusHistoryEntry[];
+  activities: CaseActivityEntry[];
   conversionProfile?: ConversionProfileDetail | null;
 }
 
