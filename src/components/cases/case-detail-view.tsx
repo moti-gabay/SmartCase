@@ -5,6 +5,7 @@ import { CaseHeader } from "@/components/cases/case-header";
 import { CaseInfoPanel } from "@/components/cases/case-info-panel";
 import { DocumentChecklist } from "@/components/cases/document-checklist";
 import { ActivityTimeline } from "@/components/cases/activity-timeline";
+import { CaseSnapshotCard } from "@/components/cases/case-snapshot-card";
 import { AiSummaryModal } from "@/components/cases/ai-summary-modal";
 import { TasksPanel } from "@/components/cases/tasks-panel";
 import { changeCaseStatus } from "@/lib/actions";
@@ -60,6 +61,10 @@ export function CaseDetailView({ caseDetail }: { caseDetail: CaseDetail }) {
         checklistProgress={checklistProgress}
         onStatusChange={handleStatusChange}
       />
+
+      <div className="border-b border-slate-200 bg-slate-50 px-5 py-3">
+        <CaseSnapshotCard snapshot={caseData.snapshot} />
+      </div>
 
       <div className="flex flex-1 overflow-hidden">
         <aside className="print-summary hidden w-72 shrink-0 overflow-y-auto border-s border-slate-200 bg-white xl:block">

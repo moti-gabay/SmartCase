@@ -259,6 +259,14 @@ export interface CaseActivityEntry {
   createdAt: string;
 }
 
+// "30-second case summary" — precomputed scannable state for the snapshot card.
+export interface CaseSnapshot {
+  portalStep: CaseStep;
+  missingDocuments: { displayName: string; status: DocumentStatus }[];
+  lastActivityAt: string | null;
+  inactivityDays: number;
+}
+
 export interface CaseDetail {
   id: string;
   caseNumber: string;
@@ -310,6 +318,7 @@ export interface CaseDetail {
   tasks: TaskDetail[];
   statusHistory: StatusHistoryEntry[];
   activities: CaseActivityEntry[];
+  snapshot: CaseSnapshot;
   conversionProfile?: ConversionProfileDetail | null;
 }
 

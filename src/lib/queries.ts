@@ -319,6 +319,15 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
   });
   if (!c) return null;
 
+  // ── Snapshot ("30-second case summary") ─────────────────────────────────────
+  const missingDocuments = c.checklist
+    .filter((i) => i.status === "MISSING" || i.status === "REJECTED")
+    .map((i) => ({ displayName: i.template.displayName, status: i.status as DocumentStatus }));
+  // activities are ordered createdAt desc, so [0] is the most recent event.
+  const lastActivity = c.activities[0]?.createdAt ?? null;
+  const inactivityBasis = lastActivity ?? c.updatedAt;
+  const inactivityDays = Math.max(0, Math.floor((Date.now() - inactivityBasis.getTime()) / 86_400_000));
+
   return {
     id: c.id,
     caseNumber: c.caseNumber,
@@ -446,6 +455,13 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
       userName: a.user?.name ?? null,
       createdAt: a.createdAt.toISOString(),
     })),
+
+    snapshot: {
+      portalStep: c.portalStep,
+      missingDocuments,
+      lastActivityAt: lastActivity ? lastActivity.toISOString() : null,
+      inactivityDays,
+    },
 
     conversionProfile: c.conversionProfile
       ? {
