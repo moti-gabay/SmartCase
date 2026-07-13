@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { generateAiSummary, commitAiSummary } from "@/lib/actions";
+import { commitAiSummary } from "@/lib/actions";
 import { Sparkles, Loader2, X, Lock, AlertTriangle } from "lucide-react";
 
 interface AiSummaryModalProps {
@@ -39,10 +39,20 @@ export function AiSummaryModal({ caseId, open, onClose }: AiSummaryModalProps) {
     setError(null);
     setIsGenerating(true);
     try {
-      const res = await generateAiSummary(caseId, rawInput);
-      setSummary(res.summary);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "יצירת הסיכום נכשלה");
+      // Dedicated route with a 60s serverless budget (longer than a server action).
+      const res = await fetch("/api/ai/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caseId, rawInput }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "יצירת הסיכום נכשלה");
+        return;
+      }
+      setSummary(data.summary);
+    } catch {
+      setError("יצירת הסיכום נכשלה. בדוק את החיבור ונסה שוב.");
     } finally {
       setIsGenerating(false);
     }
@@ -105,8 +115,16 @@ export function AiSummaryModal({ caseId, open, onClose }: AiSummaryModalProps) {
               placeholder="לדוגמה: שוחחתי עם הלקוח לגבי סטטוס התביעה. סוכם שיביא אישור רפואי עד סוף החודש. הלקוח ביקש לבדוק אפשרות לערעור..."
               className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-100 transition-all"
             />
-            <div className="mt-2 flex justify-end">
-              <Button size="sm" className="gap-1.5" disabled={!canGenerate} onClick={handleGenerate}>
+            <div className="mt-2 flex items-center justify-between gap-3">
+              {isGenerating ? (
+                <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  מנתח את השיחה ומנסח סיכום — פעולה זו עשויה להימשך עד דקה.
+                </p>
+              ) : (
+                <span />
+              )}
+              <Button size="sm" className="gap-1.5 shrink-0" disabled={!canGenerate} onClick={handleGenerate}>
                 {isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                 {isGenerating ? "מנסח סיכום..." : summary ? "נסח מחדש" : "נסח עם AI"}
               </Button>

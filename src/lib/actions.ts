@@ -9,7 +9,6 @@ import { deleteObject } from "@/core/storage/s3-storage";
 import { CASE_STEP_ORDER } from "@/lib/portal/journey";
 import { CASE_STEP_LABELS } from "@/lib/constants";
 import { logCaseActivity } from "@/lib/activity";
-import { summarizeCallHebrew } from "@/lib/ai/gemini";
 import { sendDocumentRejectionEmail } from "@/lib/notifications";
 import type { CaseStatus, CaseStep, CaseType, Priority, TaskStatus, Gender, EmploymentStatus, UserRole, UserStatus } from "@/types";
 
@@ -515,25 +514,8 @@ export async function reviewDocument(
 }
 
 // ─── AI call summary (generate → approve → lock to timeline) ────────────────────
-
-const aiSummaryInputSchema = z.object({
-  caseId: z.string().min(1),
-  rawInput: z.string().trim().min(10, "יש להזין טקסט שיחה לסיכום (לפחות 10 תווים)"),
-});
-
-// Generate-only: turns raw conversation notes into a structured Hebrew summary.
-// Persists nothing — the staff member reviews/edits before committing.
-export async function generateAiSummary(caseId: string, rawInput: string): Promise<{ summary: string }> {
-  await requireUserId();
-  const data = aiSummaryInputSchema.parse({ caseId, rawInput });
-
-  const exists = await prisma.case.findUnique({ where: { id: data.caseId }, select: { id: true } });
-  if (!exists) throw new Error("התיק לא נמצא");
-
-  const summary = await summarizeCallHebrew(data.rawInput);
-  if (!summary.trim()) throw new Error("יצירת הסיכום נכשלה");
-  return { summary };
-}
+// NOTE: generation moved to the dedicated POST /api/ai/summary route (60s budget).
+// Only the DB-writing commit remains a server action.
 
 // Commit the approved (possibly edited) summary to the timeline as an immutable
 // AI_CALL_SUMMARY activity, attributed to the acting staff member.
