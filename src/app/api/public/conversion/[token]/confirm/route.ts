@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { resolvePortalToken } from "@/lib/queries";
 import { headObject, deleteObject, MAX_UPLOAD_SIZE, ALLOWED_MIME } from "@/core/storage/s3-storage";
+import { logCaseActivity } from "@/lib/activity";
 
 // PUBLIC, UNAUTHENTICATED. Mirrors the internal confirm route's HeadObject
 // validation, but every id (document, checklist item) is cross-checked against
@@ -18,7 +19,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
 
     const doc = await prisma.document.findUnique({
       where: { id: documentId },
-      select: { id: true, caseId: true, storageKey: true },
+      select: { id: true, caseId: true, storageKey: true, displayName: true },
     });
     if (!doc || doc.caseId !== resolved.caseId || !doc.storageKey) {
       return NextResponse.json({ error: "המסמך לא נמצא" }, { status: 404 });
@@ -36,24 +37,42 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
       return NextResponse.json({ error: "סוג קובץ לא נתמך (PDF, JPG או PNG בלבד)" }, { status: 415 });
     }
 
-    await prisma.document.update({
-      where: { id: documentId },
-      data: { status: "UPLOADED_PENDING_REVIEW", fileSize: head.contentLength },
-    });
-
+    // The checklist link is validated against the token-resolved case before the
+    // write, so its caseId match is settled outside the transaction. The doc is
+    // already confirmed to belong to resolved.caseId above.
+    let linkChecklist = false;
     if (typeof checklistItemId === "string" && checklistItemId) {
       const item = await prisma.caseChecklist.findUnique({ where: { id: checklistItemId }, select: { caseId: true } });
-      if (item && item.caseId === resolved.caseId) {
-        await prisma.caseChecklist.update({
+      linkChecklist = !!item && item.caseId === resolved.caseId;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.document.update({
+        where: { id: documentId },
+        data: { status: "UPLOADED_PENDING_REVIEW", fileSize: head.contentLength },
+      });
+
+      if (linkChecklist) {
+        await tx.caseChecklist.update({
           where: { id: checklistItemId },
           data: { documentId, status: "UPLOADED_PENDING_REVIEW" },
         });
-        const stillMissing = await prisma.caseChecklist.count({
+        const stillMissing = await tx.caseChecklist.count({
           where: { caseId: resolved.caseId, status: { in: ["MISSING", "REJECTED"] } },
         });
-        await prisma.case.update({ where: { id: resolved.caseId }, data: { hasMissingDocuments: stillMissing > 0 } });
+        await tx.case.update({ where: { id: resolved.caseId }, data: { hasMissingDocuments: stillMissing > 0 } });
       }
-    }
+
+      // Client-side upload → no staff user (userId null); tagged via metadata.
+      await logCaseActivity(
+        tx,
+        resolved.caseId,
+        "DOCUMENT_UPLOADED",
+        `מסמך הועלה על ידי הלקוח: ${doc.displayName}`,
+        { documentId, via: "portal" },
+        null,
+      );
+    });
 
     revalidatePath(`/cases/${resolved.caseId}`);
     revalidatePath("/documents");

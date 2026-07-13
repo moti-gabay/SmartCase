@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/../auth";
 import { prisma } from "@/lib/prisma";
 import { headObject, deleteObject, MAX_UPLOAD_SIZE, ALLOWED_MIME } from "@/core/storage/s3-storage";
+import { logCaseActivity } from "@/lib/activity";
 
 // Step 3 of the upload: called after the browser has PUT the bytes to R2.
 // Since a presigned PUT can't enforce size/type at the edge, we verify the object
@@ -18,7 +19,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const doc = await prisma.document.findUnique({
       where: { id },
-      select: { id: true, caseId: true, storageKey: true },
+      select: { id: true, caseId: true, storageKey: true, displayName: true },
     });
     if (!doc || !doc.storageKey) return NextResponse.json({ error: "המסמך לא נמצא" }, { status: 404 });
 
@@ -35,21 +36,32 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return NextResponse.json({ error: "סוג קובץ לא נתמך (PDF, JPG או PNG בלבד)" }, { status: 415 });
     }
 
-    await prisma.document.update({
-      where: { id },
-      data: { status: "UPLOADED_PENDING_REVIEW", fileSize: head.contentLength },
-    });
+    await prisma.$transaction(async (tx) => {
+      await tx.document.update({
+        where: { id },
+        data: { status: "UPLOADED_PENDING_REVIEW", fileSize: head.contentLength },
+      });
 
-    if (typeof checklistItemId === "string" && checklistItemId) {
-      await prisma.caseChecklist.update({
-        where: { id: checklistItemId },
-        data: { documentId: id, status: "UPLOADED_PENDING_REVIEW" },
-      });
-      const stillMissing = await prisma.caseChecklist.count({
-        where: { caseId: doc.caseId, status: { in: ["MISSING", "REJECTED"] } },
-      });
-      await prisma.case.update({ where: { id: doc.caseId }, data: { hasMissingDocuments: stillMissing > 0 } });
-    }
+      if (typeof checklistItemId === "string" && checklistItemId) {
+        await tx.caseChecklist.update({
+          where: { id: checklistItemId },
+          data: { documentId: id, status: "UPLOADED_PENDING_REVIEW" },
+        });
+        const stillMissing = await tx.caseChecklist.count({
+          where: { caseId: doc.caseId, status: { in: ["MISSING", "REJECTED"] } },
+        });
+        await tx.case.update({ where: { id: doc.caseId }, data: { hasMissingDocuments: stillMissing > 0 } });
+      }
+
+      await logCaseActivity(
+        tx,
+        doc.caseId,
+        "DOCUMENT_UPLOADED",
+        `מסמך הועלה: ${doc.displayName}`,
+        { documentId: id },
+        session.user.id,
+      );
+    });
 
     revalidatePath(`/cases/${doc.caseId}`);
     revalidatePath("/documents");
