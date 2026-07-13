@@ -184,6 +184,12 @@ const he = {
   activityDocApproved: "מסמך אושר",
   activityDocRejected: "מסמך נדרש בתיקון",
   activityStepChanged: "התהליך התקדם לשלב הבא",
+  emailRejectSubject: "עדכון לגבי מסמך בתיק שלך",
+  emailGreeting: "שלום",
+  emailRejectIntro: "המסמך הבא נבדק על ידי המשרד וזקוק לתיקון והעלאה מחדש:",
+  emailReasonLabel: "סיבת הדחייה",
+  emailRejectCta: "להעלאת מסמך מתוקן",
+  emailSignature: "בברכה, צוות המשרד",
 };
 
 const en: typeof he = {
@@ -293,6 +299,12 @@ const en: typeof he = {
   activityDocApproved: "A document was approved",
   activityDocRejected: "A document needs revision",
   activityStepChanged: "Your process advanced to the next step",
+  emailRejectSubject: "An update about a document in your case",
+  emailGreeting: "Hello",
+  emailRejectIntro: "The following document was reviewed by our office and needs to be corrected and re-uploaded:",
+  emailReasonLabel: "Reason",
+  emailRejectCta: "Upload a corrected document",
+  emailSignature: "Best regards, the office team",
 };
 
 const fr: typeof he = {
@@ -403,6 +415,12 @@ const fr: typeof he = {
   activityDocApproved: "Un document a été approuvé",
   activityDocRejected: "Un document doit être corrigé",
   activityStepChanged: "Votre dossier est passé à l'étape suivante",
+  emailRejectSubject: "Mise à jour concernant un document de votre dossier",
+  emailGreeting: "Bonjour",
+  emailRejectIntro: "Le document suivant a été examiné par notre bureau et doit être corrigé puis téléversé à nouveau :",
+  emailReasonLabel: "Raison",
+  emailRejectCta: "Téléverser un document corrigé",
+  emailSignature: "Cordialement, l'équipe du bureau",
 };
 
 export const portalDict: Record<PortalLocale, typeof he> = { he, en, fr };

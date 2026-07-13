@@ -10,6 +10,7 @@ import { CASE_STEP_ORDER } from "@/lib/portal/journey";
 import { CASE_STEP_LABELS } from "@/lib/constants";
 import { logCaseActivity } from "@/lib/activity";
 import { summarizeCallHebrew } from "@/lib/ai/gemini";
+import { sendDocumentRejectionEmail } from "@/lib/notifications";
 import type { CaseStatus, CaseStep, CaseType, Priority, TaskStatus, Gender, EmploymentStatus, UserRole, UserStatus } from "@/types";
 
 // Best-effort removal of S3 objects; never let a storage error break the DB action.
@@ -495,6 +496,18 @@ export async function reviewDocument(
       userId,
     );
   });
+
+  // Notify the client on rejection — AFTER the commit, and fully isolated so a
+  // mail failure can never roll back the review or surface to the reviewer.
+  // (sendDocumentRejectionEmail already swallows its own errors; the extra
+  // guard covers anything unexpected before it, e.g. an import-time throw.)
+  if (data.status === "REJECTED") {
+    try {
+      await sendDocumentRejectionEmail(doc.caseId, doc.displayName, reason ?? "");
+    } catch (err) {
+      console.error("[reviewDocument:notify]", err);
+    }
+  }
 
   revalidatePath(`/cases/${doc.caseId}`);
   revalidatePath("/documents");
