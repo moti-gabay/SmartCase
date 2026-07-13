@@ -287,7 +287,7 @@ function ConversionPortalWizard({
       {view === "PENDING_DOCS" && (
         <DocumentsBody t={t} locale={locale} items={items} uploadingId={uploadingId} uploadError={uploadError} onUpload={triggerUpload} />
       )}
-      {isPassive && <PassiveBody t={t} step={view} />}
+      {isPassive && <PassiveBody t={t} locale={locale} step={view} activities={caseView.activities} />}
 
       {error && <p className="mt-4 text-center text-sm font-medium text-red-600">{error}</p>}
 

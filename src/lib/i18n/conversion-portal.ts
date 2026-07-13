@@ -179,6 +179,11 @@ const he = {
   awaitingBody: "קיבלנו את כל הפרטים והמסמכים. המשרד ייצור איתכם קשר בהקדם לתיאום המשך התהליך.",
   trackingTitle: "הבקשה שלכם בטיפול",
   trackingBody: "התיק נמצא כעת בטיפול המשרד ובבית הדין. נעדכן אתכם בכל התקדמות.",
+  timelineTitle: "מעקב התקדמות",
+  timelineEmpty: "אין עדיין עדכונים להצגה.",
+  activityDocApproved: "מסמך אושר",
+  activityDocRejected: "מסמך נדרש בתיקון",
+  activityStepChanged: "התהליך התקדם לשלב הבא",
 };
 
 const en: typeof he = {
@@ -283,6 +288,11 @@ const en: typeof he = {
   awaitingBody: "We've received all your details and documents. The office will contact you shortly to arrange the next steps.",
   trackingTitle: "Your application is being processed",
   trackingBody: "Your file is now being handled by the office and the court. We'll keep you updated on any progress.",
+  timelineTitle: "Progress tracker",
+  timelineEmpty: "No updates to show yet.",
+  activityDocApproved: "A document was approved",
+  activityDocRejected: "A document needs revision",
+  activityStepChanged: "Your process advanced to the next step",
 };
 
 const fr: typeof he = {
@@ -388,6 +398,11 @@ const fr: typeof he = {
   awaitingBody: "Nous avons reçu toutes vos informations et documents. Le bureau vous contactera prochainement pour organiser la suite.",
   trackingTitle: "Votre demande est en cours de traitement",
   trackingBody: "Votre dossier est désormais pris en charge par le bureau et le tribunal. Nous vous tiendrons informé de toute avancée.",
+  timelineTitle: "Suivi de progression",
+  timelineEmpty: "Aucune mise à jour à afficher pour le moment.",
+  activityDocApproved: "Un document a été approuvé",
+  activityDocRejected: "Un document doit être corrigé",
+  activityStepChanged: "Votre dossier est passé à l'étape suivante",
 };
 
 export const portalDict: Record<PortalLocale, typeof he> = { he, en, fr };

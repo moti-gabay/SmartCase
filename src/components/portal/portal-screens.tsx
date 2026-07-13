@@ -4,7 +4,7 @@ import { cn, formatDate } from "@/lib/utils";
 import {
   portalDict, translateChecklistLabel, translateChecklistDescription, type PortalLocale,
 } from "@/lib/i18n/conversion-portal";
-import type { PortalCaseView, PortalChecklistItem } from "@/lib/queries";
+import type { PortalCaseView, PortalChecklistItem, PortalActivityEntry, PortalActivityType } from "@/lib/queries";
 import type { CaseStep } from "@/types";
 import { CASE_STEP_ORDER } from "@/lib/portal/journey";
 import {
@@ -291,16 +291,60 @@ export function DocumentsBody({ t, locale, items, uploadingId, uploadError, onUp
   );
 }
 
+// ── Public, presentation-only progress tracker ──
+// Renders purely from the masked activity type + timestamp (no staff identity,
+// no descriptions). Every label is localized off the enum, never DB text.
+const ACTIVITY_DOT: Record<PortalActivityType, string> = {
+  DOCUMENT_APPROVED: "bg-emerald-500",
+  DOCUMENT_REJECTED: "bg-amber-500",
+  STEP_CHANGED:      "bg-indigo-500",
+};
+
+function PublicTimeline({ t, locale, activities }: {
+  t: Dict; locale: PortalLocale; activities: PortalActivityEntry[];
+}) {
+  const label: Record<PortalActivityType, string> = {
+    DOCUMENT_APPROVED: t.activityDocApproved,
+    DOCUMENT_REJECTED: t.activityDocRejected,
+    STEP_CHANGED:      t.activityStepChanged,
+  };
+  return (
+    <div className={cn(card, "mt-4")}>
+      <h2 className="mb-4 flex items-center gap-2 text-sm font-bold text-slate-800">
+        <ListChecks className="h-4 w-4 text-indigo-500" /> {t.timelineTitle}
+      </h2>
+      {activities.length === 0 ? (
+        <p className="text-sm text-slate-400">{t.timelineEmpty}</p>
+      ) : (
+        <ol className="relative flex flex-col gap-4 border-s border-slate-200 ps-4">
+          {activities.map((a) => (
+            <li key={a.id} className="relative">
+              <span className={cn("absolute -start-[21px] top-1 h-2.5 w-2.5 rounded-full ring-2 ring-white", ACTIVITY_DOT[a.type])} />
+              <p className="text-sm font-medium text-slate-800">{label[a.type]}</p>
+              <p className="text-xs text-slate-400">{new Date(a.createdAt).toLocaleDateString(locale)}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 // ── SCHEDULE_MEETING / TRACKING: passive holding views (staff-driven / terminal) ──
-export function PassiveBody({ t, step }: { t: Dict; step: CaseStep }) {
+export function PassiveBody({ t, locale, step, activities }: {
+  t: Dict; locale: PortalLocale; step: CaseStep; activities: PortalActivityEntry[];
+}) {
   const tracking = step === "TRACKING";
   return (
-    <div className={cn(card, "text-center")}>
-      <div className={cn("mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl", tracking ? "bg-emerald-50 text-emerald-500" : "bg-indigo-50 text-indigo-500")}>
-        <CalendarClock className="h-7 w-7" />
+    <>
+      <div className={cn(card, "text-center")}>
+        <div className={cn("mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl", tracking ? "bg-emerald-50 text-emerald-500" : "bg-indigo-50 text-indigo-500")}>
+          <CalendarClock className="h-7 w-7" />
+        </div>
+        <h1 className="text-lg font-bold text-slate-900">{tracking ? t.trackingTitle : t.awaitingTitle}</h1>
+        <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-500">{tracking ? t.trackingBody : t.awaitingBody}</p>
       </div>
-      <h1 className="text-lg font-bold text-slate-900">{tracking ? t.trackingTitle : t.awaitingTitle}</h1>
-      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-500">{tracking ? t.trackingBody : t.awaitingBody}</p>
-    </div>
+      <PublicTimeline t={t} locale={locale} activities={activities} />
+    </>
   );
 }

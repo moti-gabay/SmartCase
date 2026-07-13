@@ -607,6 +607,18 @@ export interface PortalChecklistItem {
   reviewNotes: string | null;
 }
 
+// Only these activity types are ever exposed to the client. Internal events
+// (CASE_CREATED, DOCUMENT_UPLOADED, AI_CALL_SUMMARY) are never projected here.
+export type PortalActivityType = "DOCUMENT_APPROVED" | "DOCUMENT_REJECTED" | "STEP_CHANGED";
+
+// Deliberately carries NO user id/name, NO description, NO metadata — the client
+// UI renders a localized label purely from `type`. Absolute staff/public isolation.
+export interface PortalActivityEntry {
+  id: string;
+  type: PortalActivityType;
+  createdAt: string;
+}
+
 export interface PortalCaseView {
   id: string;
   caseNumber: string;
@@ -633,6 +645,7 @@ export interface PortalCaseView {
     children: { id: string; fullName: string; dateOfBirth?: string | null }[];
   } | null;
   checklist: PortalChecklistItem[];
+  activities: PortalActivityEntry[];
 }
 
 export async function getPortalCaseByToken(token: string): Promise<PortalCaseView | null> {
@@ -656,6 +669,14 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
       checklist: {
         include: { template: true, document: { select: { reviewNotes: true } } },
         orderBy: { template: { sortOrder: "asc" } },
+      },
+      // Masked timeline: strict type allowlist, and `select` (never `include`)
+      // so no user id/name, description, or metadata can leak to the client.
+      activities: {
+        where: { type: { in: ["DOCUMENT_APPROVED", "DOCUMENT_REJECTED", "STEP_CHANGED"] } },
+        select: { id: true, type: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+        take: 20,
       },
     },
   });
@@ -702,6 +723,11 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
       isMandatory: item.template.isMandatory,
       status: item.status,
       reviewNotes: item.status === "REJECTED" ? (item.document?.reviewNotes ?? null) : null,
+    })),
+    activities: c.activities.map((a) => ({
+      id: a.id,
+      type: a.type as PortalActivityType,
+      createdAt: a.createdAt.toISOString(),
     })),
   };
 }
