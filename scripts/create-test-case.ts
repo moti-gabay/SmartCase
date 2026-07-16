@@ -8,7 +8,7 @@
 // writer the Server Actions and public routes share. A case seeded here is
 // indistinguishable from one opened through the UI.
 //
-//   npm run db:seed-test -- --name="Moti Test" --step="PENDING_DOCS"
+//   npm run db:seed-test -- --name="Moti Test" --step="PENDING_DOCS" --locale="fr"
 //
 // stdout is JSON and nothing else, so it pipes into jq:
 //   npm run db:seed-test --silent -- --name=X | jq -r .publicUrl
@@ -28,6 +28,7 @@ import {
 } from "../src/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { logCaseActivity } from "../src/lib/activity";
+import { isPortalLocale, PORTAL_LOCALES } from "../src/lib/i18n/conversion-portal";
 
 // Prisma 7: the driver adapter owns the connection. CLI/seed use DIRECT_URL.
 const adapter = new PrismaPg(process.env.DIRECT_URL ?? process.env.DATABASE_URL!);
@@ -97,6 +98,11 @@ async function main() {
     throw new Error(`Invalid --step "${step}". Expected one of: ${Object.values(CaseStep).join(", ")}`);
   }
 
+  const locale = flags.locale ?? "he";
+  if (!isPortalLocale(locale)) {
+    throw new Error(`Invalid --locale "${locale}". Expected one of: ${PORTAL_LOCALES.join(", ")}`);
+  }
+
   // Cases require a creator FK; the portal journey belongs to a real staff owner.
   const creator = await prisma.user.findFirst({
     where: { role: UserRole.ADMIN, status: UserStatus.APPROVED },
@@ -128,6 +134,7 @@ async function main() {
         gender: Gender.OTHER,
         phone: "050-0000000",
         email: TEST_EMAIL,
+        locale,
       },
       select: { id: true },
     });
@@ -170,6 +177,7 @@ async function main() {
     JSON.stringify(
       {
         caseId: created.id,
+        locale,
         portalToken: token,
         staffUrl: `${BASE_URL}/cases/${created.id}`,
         publicUrl: `${BASE_URL}/share/conversion/${token}`,

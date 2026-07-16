@@ -54,15 +54,33 @@ function PortalHeader({ locale, onLocaleChange }: { locale: PortalLocale; onLoca
 }
 
 export function ConversionPortalView({ token, caseView }: { token: string; caseView: PortalCaseView | null }) {
-  const [locale, setLocale] = useState<PortalLocale>("he");
+  // Seeded from the client's persisted Client.locale (already normalized to a
+  // PortalLocale in getPortalCaseByToken), so a returning client lands in their
+  // own language instead of always starting at Hebrew. An invalid/expired link
+  // has no client to read, so it falls back to the office default.
+  const [locale, setLocale] = useState<PortalLocale>(caseView?.client.locale ?? "he");
   const [expired, setExpired] = useState(false);
   usePortalDirection(locale);
   const t = portalDict[locale];
   const invalid = !caseView || expired;
 
+  // Flip the UI immediately, then persist in the background. The switch must
+  // never feel like it's waiting on the network, and a failed save is not worth
+  // interrupting the client over — it just means the choice doesn't outlive the
+  // session, which is exactly the pre-Slice-9 behaviour.
+  const onLocaleChange = (next: PortalLocale) => {
+    setLocale(next);
+    if (!caseView) return;
+    void fetch(`/api/public/conversion/${token}/locale`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ locale: next }),
+    }).catch(() => {});
+  };
+
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
-      <PortalHeader locale={locale} onLocaleChange={setLocale} />
+      <PortalHeader locale={locale} onLocaleChange={onLocaleChange} />
       {invalid ? (
         <main className="flex flex-1 items-center justify-center p-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-2xl">

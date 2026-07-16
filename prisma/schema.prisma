@@ -204,6 +204,13 @@ model Client {
   gender           Gender
   phone            String
   email            String?
+  // Persisted portal/communication language (PortalLocale: "he" | "en" | "fr").
+  // A plain String, not a DB enum, so the locale set stays owned by the i18n
+  // dictionary in src/lib/i18n/conversion-portal.ts — which already holds the
+  // labels and direction map — instead of being split across a schema enum and
+  // a second label table. Values are guarded by isPortalLocale() at every
+  // boundary that reads or writes this column.
+  locale           String           @default("he")
   addressStreet    String?
   addressCity      String?
   addressZip       String?

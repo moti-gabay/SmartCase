@@ -14,6 +14,14 @@ export type PortalLocale = "he" | "en" | "fr";
 
 export const PORTAL_LOCALES: PortalLocale[] = ["he", "en", "fr"];
 
+// Client.locale is a plain TEXT column, so every value crossing a boundary —
+// read from the DB, posted by the portal, passed to the CLI — is unverified
+// until it passes through here. Callers that read the DB fall back to "he"
+// (the office's primary language); callers accepting user input reject instead.
+export function isPortalLocale(value: unknown): value is PortalLocale {
+  return typeof value === "string" && (PORTAL_LOCALES as string[]).includes(value);
+}
+
 export const PORTAL_LOCALE_LABELS: Record<PortalLocale, string> = {
   he: "עברית",
   en: "English",

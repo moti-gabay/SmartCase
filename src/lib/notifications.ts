@@ -4,7 +4,7 @@
 // business action that triggered it.
 import { Resend } from "resend";
 import { prisma } from "@/lib/prisma";
-import { portalDict, type PortalLocale } from "@/lib/i18n/conversion-portal";
+import { isPortalLocale, portalDict, type PortalLocale } from "@/lib/i18n/conversion-portal";
 
 // Lazy client so the module loads without RESEND_API_KEY (dev / CI).
 let _resend: Resend | null = null;
@@ -22,11 +22,12 @@ function baseUrl(): string {
   return (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "").replace(/\/$/, "");
 }
 
-// The client's portal language is not persisted yet, so we default to Hebrew
-// (the office's primary language). Isolated as a resolver so a future
-// `Client.locale` column can feed it without touching call sites.
-function resolveLocale(): PortalLocale {
-  return "he";
+// Resolves the language to write the email in from the client's persisted
+// preference. Falls back to Hebrew (the office's primary language) if the
+// column ever holds something outside the dictionary — a mail must always go
+// out in *some* language rather than fail on a bad value.
+function resolveLocale(clientLocale: string): PortalLocale {
+  return isPortalLocale(clientLocale) ? clientLocale : "he";
 }
 
 function escapeHtml(s: string): string {
@@ -52,7 +53,7 @@ export async function sendDocumentRejectionEmail(
       where: { id: caseId },
       select: {
         clientPortalToken: true,
-        client: { select: { fullName: true, email: true } },
+        client: { select: { fullName: true, email: true, locale: true } },
       },
     });
 
@@ -61,7 +62,7 @@ export async function sendDocumentRejectionEmail(
     // No recipient or no secure link → nothing safe to send.
     if (!c || !email || !token) return;
 
-    const locale = resolveLocale();
+    const locale = resolveLocale(c.client.locale);
     const t = portalDict[locale];
     const dir = locale === "he" ? "rtl" : "ltr";
     const link = `${baseUrl()}/share/conversion/${token}`;

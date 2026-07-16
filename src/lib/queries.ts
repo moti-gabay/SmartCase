@@ -2,6 +2,7 @@
 // that the UI components already consume. Import ONLY from server components /
 // server actions / route handlers — never from a "use client" module.
 import { prisma } from "@/lib/prisma";
+import { isPortalLocale, type PortalLocale } from "@/lib/i18n/conversion-portal";
 import type {
   DashboardStats,
   CaseSummary,
@@ -632,6 +633,9 @@ export interface PortalCaseView {
     phone: string;
     email?: string | null;
     addressCity?: string | null;
+    // Normalized at this boundary (see getPortalCaseByToken) so consumers get a
+    // real PortalLocale, never the raw TEXT column.
+    locale: PortalLocale;
   };
   conversionProfile: {
     spouseFullName?: string | null;
@@ -662,7 +666,7 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
       client: {
         select: {
           id: true, fullName: true, nationalId: true, dateOfBirth: true,
-          phone: true, email: true, addressCity: true,
+          phone: true, email: true, addressCity: true, locale: true,
         },
       },
       conversionProfile: { include: { children: true } },
@@ -697,6 +701,7 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
       phone: c.client.phone,
       email: c.client.email,
       addressCity: c.client.addressCity,
+      locale: isPortalLocale(c.client.locale) ? c.client.locale : "he",
     },
     conversionProfile: c.conversionProfile
       ? {
