@@ -12,6 +12,10 @@
 //
 // stdout is JSON and nothing else, so it pipes into jq:
 //   npm run db:seed-test --silent -- --name=X | jq -r .publicUrl
+//
+// The `create_test_case` MCP tool (scripts/mcp/tools.ts) seeds the same shape for
+// AI callers. The two duplicate this recipe rather than share it; change one and
+// change the other.
 import "dotenv/config";
 import { randomBytes, randomInt } from "node:crypto";
 import {
