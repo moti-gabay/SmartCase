@@ -30,6 +30,19 @@ Dependencies must be installed with `npm install --legacy-peer-deps` (see [.npmr
 
 Unit tests use Node's built-in runner (`node:test`) via `tsx` — no extra deps. Run `npm test` (executes `tests/*.test.ts`). Coverage is the pure/deterministic logic: `src/lib/utils.ts`, the native `src/core/storage/s3-storage.ts` signer, and `src/lib/constants.ts` integrity. DB queries, API routes, and React components are covered by manual E2E, not unit tests.
 
+## Claude Code tooling (MCP / Skills / Commands)
+
+Team-shared, committed at repo level. Secrets are **never** committed — `.mcp.json` uses `${ENV}` placeholders expanded from the environment at launch.
+
+- **MCP servers** ([.mcp.json](.mcp.json)):
+  - `github` — hosted MCP (`https://api.githubcopilot.com/mcp/`), auth'd via `Bearer ${GITHUB_PAT}` (fine-grained PAT, repo scope). No local process.
+  - `postgres` — `@modelcontextprotocol/server-postgres` against `${DATABASE_URL}` (pooler URL is fine, read-only). That reference server is in maintenance mode; `crystaldba/postgres-mcp` is the upgrade path if you want EXPLAIN / index-health analysis for the Prisma perf work.
+  - `playwright` — official `@playwright/mcp`, drives a real browser for the Hebrew/RTL public-portal E2E (no `@playwright/test` dep added).
+  - `context7` — hosted Upstash MCP (`https://mcp.context7.com/mcp`), keyless. Serves up-to-date library docs (Next.js 16, Prisma 7, NextAuth v5) — the antidote to the "This is NOT the Next.js you know" drift. Add `CONTEXT7_API_KEY` via an `Authorization: Bearer` header for higher rate limits.
+  - `slack` — `@modelcontextprotocol/server-slack` via npx, auth'd via `${SLACK_BOT_TOKEN}`/`${SLACK_TEAM_ID}` (bot token from a Slack app, scopes: `channels:history`, `channels:read`, `chat:write`, `reactions:write`, `users:read`, `users.profile:read`). Upstream package is archived/deprecated (Slack now ships its own hosted MCP at `mcp.slack.com`, which needs a registered OAuth app instead of a bot token) — kept here for the simpler token-based setup; revisit if it stops working.
+- **Skill** `nextjs16-convention-validator` ([.claude/skills/](.claude/skills/nextjs16-convention-validator/SKILL.md)) — auto-loads when editing/reviewing invariant-touching code (middleware, auth, Prisma, public portal, printing, RTL, enum→i18n) and reports violations against the invariants below.
+- **Command** `/new-slice <desc>` ([.claude/commands/new-slice.md](.claude/commands/new-slice.md)) — scaffolds a vertical feature slice through the canonical file-flow (schema → types → constants → queries → actions → i18n → routes/UI), runs the validator skill, then the `npm test` + `npm run build` gate.
+
 ## Architecture
 
 ### Prisma 7 + driver adapter (non-standard setup)

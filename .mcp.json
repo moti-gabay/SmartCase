@@ -9,11 +9,18 @@
     },
     "postgres": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-postgres", "${DATABASE_URL}"]
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "${DATABASE_URL}"
+      ]
     },
     "playwright": {
       "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest"]
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ]
     },
     "context7": {
       "type": "http",
@@ -21,7 +28,28 @@
     },
     "smartcase": {
       "command": "npx",
-      "args": ["tsx", "scripts/mcp/server.ts"]
+      "args": [
+        "tsx",
+        "scripts/mcp/server.ts"
+      ]
+    },
+    "slack": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-slack"
+      ],
+      "env": {
+        "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
+        "SLACK_TEAM_ID": "${SLACK_TEAM_ID}",
+        "SLACK_CHANNEL_IDS": "${SLACK_CHANNEL_IDS}"
+      }
+    },
+    "code-review-graph": {
+      "command": "code-review-graph",
+      "args": ["serve"],
+      "cwd": "/home/moti/projects/SmartCase",
+      "type": "stdio"
     }
   }
 }
