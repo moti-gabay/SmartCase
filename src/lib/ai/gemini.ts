@@ -15,6 +15,9 @@ function getClient(): GoogleGenAI {
   return _client;
 }
 
+// Shared lazy client for other AI features (assistant chat uses its own model).
+export const getGeminiClient = getClient;
+
 // Strip Markdown/formatting so letters come back as clean plain text.
 function stripMarkdown(text: string): string {
   return text
