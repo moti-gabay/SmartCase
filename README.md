@@ -30,9 +30,19 @@ Team-shared, committed at repo level. Secrets are **never** committed — `.mcp.
 | `slack` | Team Slack — channel history, posting, reactions |
 | `code-review-graph` | Local knowledge-graph server powering the review/refactor/debug skills below |
 
-**Skills** ([.claude/skills/](.claude/skills/)): `review-changes`, `explore-codebase`, `debug-issue`, `refactor-safely`, `nextjs16-convention-validator` (validates code against this repo's non-standard Next.js 16 / Prisma 7 / NextAuth v5 invariants).
+**Slash commands used during development** — repo-defined commands/skills under `.claude/commands/` and `.claude/skills/`, plus the built-in Claude Code commands this project's workflow leans on:
 
-**Commands**: `/new-slice <desc>` ([.claude/commands/new-slice.md](.claude/commands/new-slice.md)) scaffolds a vertical feature slice through the canonical file-flow (schema → types → constants → queries → actions → i18n → routes/UI).
+| Command | Type | Purpose |
+|---|---|---|
+| `/new-slice <desc>` | repo command ([.claude/commands/new-slice.md](.claude/commands/new-slice.md)) | Scaffolds a vertical feature slice through the canonical file-flow (schema → types → constants → queries → actions → i18n → routes/UI), then runs the validator skill + `npm test`/`npm run build` gate |
+| `/review-changes` | repo skill ([.claude/skills/review-changes/](.claude/skills/review-changes/)) | Risk-scored review of a diff via `code-review-graph` — change detection, affected flows, test-coverage gaps |
+| `/explore-codebase` | repo skill | Navigates repo structure/relationships using the `code-review-graph` knowledge graph |
+| `/debug-issue` | repo skill | Graph-powered root-cause tracing for a bug report |
+| `/refactor-safely` | repo skill | Dependency-aware refactor planning before touching shared code |
+| `/nextjs16-convention-validator` | repo skill | Checks code against this repo's non-standard Next.js 16 / Prisma 7 / NextAuth v5 invariants (auto-loads on middleware/auth/Prisma/public-portal/printing/RTL changes) |
+| `/code-review` | built-in | Multi-angle bug-hunting review of the working diff (this repo's day-to-day PR review) |
+
+`/code-review ultra` (or its alias `/ultrareview`) runs the same review as a billed, multi-agent cloud job — useful before merging riskier changes.
 
 ## Getting started
 
