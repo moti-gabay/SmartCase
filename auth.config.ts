@@ -11,6 +11,9 @@ export const authConfig = {
 
   pages: {
     signIn: "/login",
+    // Keep OAuth/auth errors (e.g. Google AccessDenied) on our branded login
+    // page — ?error= is read there — instead of Auth.js's default /api/auth/error.
+    error: "/login",
   },
 
   callbacks: {
