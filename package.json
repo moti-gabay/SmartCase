@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "code-graph": "code-review-graph --base main --head current-branch",
     "predev": "prisma generate",
     "dev": "next dev",
     "build": "prisma generate && next build",

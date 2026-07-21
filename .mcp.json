@@ -37,7 +37,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-slack"
+        "@modelcontextprotocol/server-slack@2025.4.25"
       ],
       "env": {
         "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
@@ -48,7 +48,6 @@
     "code-review-graph": {
       "command": "code-review-graph",
       "args": ["serve"],
-      "cwd": "/home/moti/projects/SmartCase",
       "type": "stdio"
     }
   }
