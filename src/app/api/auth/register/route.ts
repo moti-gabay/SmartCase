@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma"
 
 const schema = z.object({
   name:     z.string().min(2),
-  email:    z.string().email(),
+  email:    z.string().trim().toLowerCase().email(),
   password: z.string().min(8),
 })
 
@@ -14,7 +14,11 @@ export async function POST(req: Request) {
     const body = await req.json()
     const { name, email, password } = schema.parse(body)
 
-    const existing = await prisma.user.findUnique({ where: { email } })
+    // Case-insensitive: `email` is already normalized to lowercase, but legacy
+    // rows may hold mixed-case emails from before normalization — match either.
+    const existing = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: "insensitive" } },
+    })
     if (existing) {
       return NextResponse.json({ error: "כתובת הדוא\"ל כבר רשומה במערכת" }, { status: 409 })
     }
