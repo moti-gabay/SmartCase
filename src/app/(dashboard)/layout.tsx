@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
+import { AssistantDrawer } from "@/components/ai/assistant-drawer";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -15,6 +16,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="flex flex-1 flex-col overflow-hidden">
         {children}
       </div>
+
+      <AssistantDrawer />
     </div>
   );
 }

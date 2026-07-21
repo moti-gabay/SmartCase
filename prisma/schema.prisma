@@ -163,6 +163,13 @@ enum CaseStep {
   TRACKING           // terminal passive milestone view
 }
 
+// AI assistant chat message author. Internal to the chat feature — not rendered
+// as a labeled status chip, so it has no entry in src/lib/constants.ts.
+enum ChatRole {
+  USER
+  ASSISTANT
+}
+
 // ─── User (Agents / Supervisors / Admins) ─────────────────────────────────────
 
 model User {
@@ -189,6 +196,7 @@ model User {
   auditLogs      AuditLog[]
   generatedLetters GeneratedLetter[] @relation("LetterAuthor")
   activities     CaseActivity[]
+  conversations  Conversation[]
 
   @@index([status])
   @@map("users")
@@ -518,4 +526,37 @@ model ConversionChild {
 
   @@index([conversionProfileId])
   @@map("conversion_children")
+}
+
+// ─── AI Assistant Chat (staff-only, read-only tools) ──────────────────────────
+// One rolling conversation per user surfaced in the dashboard drawer; "שיחה
+// חדשה" creates a fresh row (old rows kept, not listed). Tool results are never
+// stored — only the final text plus a compact toolCalls audit trail.
+
+model Conversation {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String? // first user message, truncated to 80 chars
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+
+  @@index([userId, updatedAt])
+  @@map("conversations")
+}
+
+model ChatMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           ChatRole
+  content        String   @db.Text // final text (markdown for assistant turns)
+  toolCalls      Json? // assistant only: [{ name, args, ok, ms }] — args/status, never results
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("chat_messages")
 }
