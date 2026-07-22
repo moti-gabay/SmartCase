@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Bell, Search, Plus, Loader2, User, FolderOpen } from "lucide-react";
+import { Bell, Search, Plus, Loader2, Menu, User, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
 import { CASE_TYPE_LABELS } from "@/lib/constants";
+import { useMobileSidebar } from "@/components/layout/mobile-sidebar-context";
 import type { CaseStatus, CaseType } from "@/types";
 
 interface HeaderProps {
@@ -17,6 +18,7 @@ interface ClientHit { id: string; fullName: string; nationalId: string }
 interface CaseHit { id: string; caseNumber: string; caseType: CaseType; status: CaseStatus; clientName: string }
 
 export function Header({ title, subtitle }: HeaderProps) {
+  const { setOpen: setMobileSidebarOpen } = useMobileSidebar();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -61,6 +63,17 @@ export function Header({ title, subtitle }: HeaderProps) {
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-slate-200 bg-white px-6 shadow-sm">
+      {/* Mobile nav toggle — hidden md:+, where the sidebar is always visible */}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-9 w-9 shrink-0 p-0 md:hidden"
+        onClick={() => setMobileSidebarOpen(true)}
+        aria-label="פתח תפריט ניווט"
+      >
+        <Menu className="h-5 w-5" />
+      </Button>
+
       {/* Page title */}
       <div className="flex-1 min-w-0">
         <h1 className="text-lg font-semibold text-slate-900 leading-tight">{title}</h1>
