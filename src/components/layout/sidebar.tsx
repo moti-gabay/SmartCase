@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { useMobileSidebar } from "@/components/layout/mobile-sidebar-context";
+import { useEscapeKey } from "@/hooks/use-escape-key";
 import {
   LayoutDashboard,
   FolderOpen,
@@ -41,26 +42,88 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
+// SSR-safe: defaults to false (matching the server render) and syncs to the
+// real value post-mount. The single <aside> below serves both a persistent
+// md:+ sidebar and an off-canvas mobile drawer — every mobile-drawer-only
+// behavior (inert, dialog semantics, focus trap, scroll lock) must key off
+// real viewport width, not just `mobileOpen`, or it would also fire against
+// the always-visible desktop layout.
+function useIsDesktopViewport() {
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 768px)");
+    setIsDesktop(mql.matches);
+    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+  return isDesktop;
+}
+
 export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
   const pathname   = usePathname();
   const router     = useRouter();
   const { data: session } = useSession();
   const { open: mobileOpen, setOpen: setMobileOpen } = useMobileSidebar();
   const closeMobile = () => setMobileOpen(false);
+  const asideRef = useRef<HTMLElement>(null);
+
+  const isDesktopViewport = useIsDesktopViewport();
+  // Closed-and-off-canvas (mobile only) → must be inert/hidden-from-AT so it
+  // drops out of the tab order. Open-as-overlay (mobile only) → acts as a
+  // modal dialog (role/aria-modal, focus trap, scroll lock, Escape-to-close).
+  // Both are false on desktop, where the sidebar is always visible and never
+  // a dialog regardless of the leftover `mobileOpen` flag.
+  const mobileInert       = !isDesktopViewport && !mobileOpen;
+  const isMobileDrawerOpen = !isDesktopViewport && mobileOpen;
 
   const userName    = session?.user?.name  ?? "משתמש";
   const userEmail   = session?.user?.email ?? "";
   const isAdmin     = session?.user?.role === "ADMIN";
   const initials    = userName.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 
-  // Escape closes the mobile drawer (desktop is unaffected — mobileOpen has
-  // no bearing on the always-visible md:+ layout).
+  useEscapeKey(isMobileDrawerOpen, closeMobile);
+
+  // Lock body scroll behind the drawer while it's open as a mobile overlay.
   useEffect(() => {
-    if (!mobileOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMobileOpen(false);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [mobileOpen, setMobileOpen]);
+    if (!isMobileDrawerOpen) return;
+    const original = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = original; };
+  }, [isMobileDrawerOpen]);
+
+  // Focus trap: move focus in on open, cycle Tab within the drawer, restore
+  // focus to whatever triggered it (the header hamburger button) on close.
+  useEffect(() => {
+    if (!isMobileDrawerOpen) return;
+    const container = asideRef.current;
+    if (!container) return;
+
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const focusable = () =>
+      Array.from(container.querySelectorAll<HTMLElement>("a[href], button:not([disabled])"));
+    focusable()[0]?.focus();
+
+    function onTab(e: KeyboardEvent) {
+      if (e.key !== "Tab") return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    window.addEventListener("keydown", onTab);
+    return () => {
+      window.removeEventListener("keydown", onTab);
+      previouslyFocused?.focus();
+    };
+  }, [isMobileDrawerOpen]);
 
   return (
     <>
@@ -68,13 +131,24 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
           on desktop even if mobileOpen was left true after a resize. */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-slate-900/40 md:hidden"
+          // z-50 (not z-40): must outrank the AI assistant FAB (also fixed,
+          // z-40) purely by z-index, since that button lives in a sibling
+          // component (AssistantDrawer) rendered later in the DOM — relying on
+          // DOM order alone let it show through and stay clickable above this
+          // backdrop.
+          className="fixed inset-0 z-50 bg-slate-900/40 md:hidden"
           onClick={closeMobile}
           aria-hidden="true"
         />
       )}
 
       <aside
+        ref={asideRef}
+        inert={mobileInert}
+        aria-hidden={mobileInert}
+        role={isMobileDrawerOpen ? "dialog" : undefined}
+        aria-modal={isMobileDrawerOpen ? true : undefined}
+        aria-label="תפריט ניווט ראשי"
         className={cn(
           "flex h-full w-60 flex-col border-s border-white/10 bg-[#1e1b4b] transition-transform duration-300",
           // Mobile: fixed overlay drawer, off-canvas by default.

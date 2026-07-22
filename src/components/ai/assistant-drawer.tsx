@@ -8,6 +8,7 @@ import { Loader2, Plus, Send, Sparkles, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatMarkdown } from "@/components/ai/chat-markdown";
 import { useChatStream, type ChatMessage } from "@/components/ai/use-chat-stream";
+import { useEscapeKey } from "@/hooks/use-escape-key";
 
 // memo: only the actively-streaming message's content changes per SSE chunk —
 // the array reference from setMessages changes every chunk, but unchanged
@@ -47,12 +48,7 @@ export function AssistantDrawer() {
     if (open) hydrate();
   }, [open, hydrate]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  useEscapeKey(open, () => setOpen(false));
 
   // Follow the stream: keep the newest content in view.
   useEffect(() => {
