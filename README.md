@@ -9,7 +9,7 @@ UI copy, enum labels, and AI prompts are all in Hebrew. See [ROLES.md](ROLES.md)
 - **Framework**: Next.js 16 (App Router), React 19, TypeScript
 - **Database**: PostgreSQL via Prisma 7 with the `@prisma/adapter-pg` driver adapter (generated client lives at `src/generated/prisma`, not `node_modules`)
 - **Auth**: NextAuth v5 (beta), Credentials provider with bcrypt, JWT sessions, split Edge/Node config
-- **AI**: Google Gemini (`@google/genai`, model `gemini-2.5-flash-lite`) for Hebrew document validation and letter drafting
+- **AI**: Google Gemini (`@google/genai`, model `gemini-2.5-flash-lite`) for Hebrew document validation and letter drafting; the staff-only assistant chat (`gemini-2.5-flash`) runs all user/tool content through a PII sanitization hook ([src/lib/ai/pii-sanitizer.ts](src/lib/ai/pii-sanitizer.ts)) before it reaches the model
 - **UI**: Tailwind CSS v4 + `tailwindcss-rtl`, Radix UI primitives, `react-hook-form` + Zod
 - **Email**: Resend, localized per client
 - **Printing/PDF**: native browser `window.print()` only — no canvas-rasterization libraries (breaks Hebrew RTL text)
@@ -44,6 +44,10 @@ Team-shared, committed at repo level. Secrets are **never** committed — `.mcp.
 
 `/code-review ultra` (or its alias `/ultrareview`) runs the same review as a billed, multi-agent cloud job — useful before merging riskier changes.
 
+The [BMAD-METHOD](https://github.com/bmad-method) framework is also installed under `.claude/skills/` (`bmad-*`), adding agent personas (analyst, architect, PM, dev, UX designer, tech writer, etc.) and workflow skills for planning, spec/PRD authoring, story-driven dev, and adversarial code review — invoked by name (e.g. "talk to Winston") or by skill trigger phrase (e.g. "create a spec", "run a retrospective").
+
+A `Stop`/`StopFailure` hook ([.claude/settings.json](.claude/settings.json) → [.claude/hooks/session-summary.sh](.claude/hooks/session-summary.sh)) posts an end-of-session summary at the close of every Claude Code session.
+
 ## Getting started
 
 Install dependencies (requires `--legacy-peer-deps`, see [.npmrc](.npmrc)):
@@ -74,6 +78,7 @@ npm run db:generate   # prisma generate → regenerates src/generated/prisma
 npm run db:migrate    # prisma migrate dev
 npm run db:push       # prisma db push (no migration file)
 npm run db:seed       # tsx prisma/seed.ts
+npm run db:seed-test  # tsx scripts/create-test-case.ts (single test case, for MCP/dev use)
 npm run db:studio     # prisma studio
 npm run db:audit      # weekly case-audit CLI
 npm run mcp:serve     # run the smartcase MCP server standalone
