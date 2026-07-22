@@ -44,6 +44,11 @@ Team-shared, committed at repo level. Secrets are **never** committed — `.mcp.
 - **Skill** `nextjs16-convention-validator` ([.claude/skills/](.claude/skills/nextjs16-convention-validator/SKILL.md)) — auto-loads when editing/reviewing invariant-touching code (middleware, auth, Prisma, public portal, printing, RTL, enum→i18n) and reports violations against the invariants below.
 - **Command** `/new-slice <desc>` ([.claude/commands/new-slice.md](.claude/commands/new-slice.md)) — scaffolds a vertical feature slice through the canonical file-flow (schema → types → constants → queries → actions → i18n → routes/UI), runs the validator skill, then the `npm test` + `npm run build` gate.
 
+## Slack Instructions Workflow
+
+1. **Slack command reader** — at the start of every session, or whenever asked to "check Slack," use the `slack` MCP tool (`mcp__slack__slack_get_channel_history`) to read the latest messages from the channel configured in `SLACK_NOTIFY_CHANNEL`. If the latest message contains a task, instruction, or feedback from the user, treat it as the session's main objective and execute it.
+2. **Closing the loop** — continue sending the end-of-session summary as already configured via the `Stop`/`StopFailure` hooks in [.claude/settings.json](.claude/settings.json), which run [.claude/hooks/session-summary.sh](.claude/hooks/session-summary.sh).
+
 ## Architecture
 
 ### Prisma 7 + driver adapter (non-standard setup)
