@@ -1,4 +1,5 @@
 {
+  "effortLevel": "medium",
   "permissions": {
     "allow": [
       "Bash(npm --version)",
@@ -37,5 +38,31 @@
     "playwright",
     "context7",
     "smartcase"
-  ]
+  ],
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/session-summary.sh",
+            "timeout": 15,
+            "statusMessage": "Saving session summary..."
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/session-summary.sh",
+            "timeout": 15,
+            "statusMessage": "Saving failure summary..."
+          }
+        ]
+      }
+    ]
+  }
 }

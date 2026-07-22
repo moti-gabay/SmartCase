@@ -53,6 +53,8 @@ Connection URLs are **not** in [prisma/schema.prisma](prisma/schema.prisma) (Pri
 - **Runtime**: [src/lib/prisma.ts](src/lib/prisma.ts) constructs a `PrismaPg` adapter from `DATABASE_URL` (pooler is fine). Import the singleton `prisma` from here — never `new PrismaClient()`.
 - **CLI/migrations**: [prisma.config.ts](prisma.config.ts) reads `DIRECT_URL` (fall back `DATABASE_URL`). Point `DIRECT_URL` at the direct 5432 connection, not the pooler.
 
+There is no `prisma/migrations/` history — schema changes are pushed with `npm run db:push`, not `prisma migrate dev`. Because of this, RLS (Row Level Security) is **not** managed by Prisma's schema DSL and will never be enabled automatically. After adding any new model, manually run [prisma/sql/enable-rls.sql](prisma/sql/enable-rls.sql) (updated with the new table) against Supabase. The app's own queries are unaffected — `DATABASE_URL` connects as the table owner, which bypasses RLS by default — this only closes off Supabase's auto-generated PostgREST/GraphQL API from anonymous access.
+
 ### Auth — the three-file NextAuth v5 split
 NextAuth is split so the Edge middleware never imports Node-only code:
 - [auth.config.ts](auth.config.ts) — Edge-safe: route-protection `authorized` callback and `pages`, no Prisma/bcrypt. Protected prefixes: `/dashboard`, `/cases`, `/clients`.
