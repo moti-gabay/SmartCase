@@ -8,10 +8,12 @@
       "Bash(npx create-next-app@latest smartcase-app --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-turbopack --yes)",
       "Bash(cp -r /home/moti/projects/smartcase-app/. /home/moti/projects/SmartCase/)",
       "Bash(rm -rf /home/moti/projects/smartcase-app)",
-      "Bash(npm install *)",
-      "Bash(npx prisma *)",
+      "Bash(npx prisma generate)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('tailwindcss:', d.get\\('dependencies',{}\\).get\\('tailwindcss',''\\) or d.get\\('devDependencies',{}\\).get\\('tailwindcss',''\\)\\); print\\('next:', d['dependencies'].get\\('next',''\\)\\); print\\('prisma:', d['devDependencies'].get\\('prisma',''\\) or d['dependencies'].get\\('prisma',''\\)\\)\")",
       "Bash(npx tsc *)",
+      "Bash(npm run lint)",
+      "Bash(npm run test*)",
+      "Bash(npm run build)",
       "Bash(npm run *)",
       "Bash(python3 -c \"import json; d=json.load\\(open\\('package.json'\\)\\); [print\\(f'  {k}: {v}'\\) for k,v in d['scripts'].items\\(\\)]\")",
       "Bash(openssl rand *)",
@@ -29,7 +31,25 @@
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('peerDeps:', json.dumps\\(d.get\\('peerDependencies',{}\\), indent=2\\)\\)\")",
       "Bash(nslookup aws-0-eu-west-1.pooler.supabase.com)",
       "Bash(nc *)",
-      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('version:', d['version']\\)\")"
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('version:', d['version']\\)\")",
+      "Bash(git status)",
+      "Bash(git diff*)",
+      "Bash(git branch*)"
+    ],
+    "ask": [
+      "Bash(npm install *)",
+      "Bash(npm uninstall *)",
+      "Bash(npx prisma db push*)",
+      "Bash(npx prisma migrate dev*)",
+      "Bash(git push origin *)",
+      "Bash(git merge *)"
+    ],
+    "deny": [
+      "Bash(git push origin main --force)",
+      "Bash(git push origin master --force)",
+      "Bash(git reset --hard origin/*)",
+      "Bash(npx prisma migrate reset*)",
+      "Bash(rm -rf *)"
     ]
   },
   "enabledMcpjsonServers": [
