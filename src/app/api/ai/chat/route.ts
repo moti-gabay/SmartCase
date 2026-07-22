@@ -13,6 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { getGeminiClient } from "@/lib/ai/gemini";
 import { buildSystemPrompt } from "@/lib/ai/assistant-prompt";
 import { executeAssistantTool, getToolDeclarations } from "@/lib/ai/assistant-tools";
+import { collectPiiValues, maskPii, type PiiTag } from "@/lib/ai/pii-sanitizer";
 import {
   HEARTBEAT_MS,
   HISTORY_MESSAGES,
@@ -39,6 +40,13 @@ const CHAT_MODEL = "gemini-2.5-flash";
 // otherwise the next turn's history has two consecutive "user" contents,
 // which Gemini's multi-turn API isn't built to handle.
 const FALLBACK_TEXT = "מצטער, אירעה שגיאה ולא הצלחתי לענות. נסה לשלוח את השאלה שוב.";
+
+// Slice to maxLen, then strip a trailing unclosed "[...]" mask-tag fragment
+// the cut could otherwise leave behind (masking can inflate length near the
+// boundary, e.g. a 9-digit id becoming the longer "[תז_ממוסכת]" tag).
+function sliceMaskSafe(text: string, maxLen: number): string {
+  return text.slice(0, maxLen).replace(/\[[^\]]*$/, "");
+}
 
 export async function GET() {
   const session = await auth();
@@ -79,6 +87,9 @@ export async function POST(req: Request) {
   if (!message || message.length > MAX_MESSAGE_CHARS) {
     return NextResponse.json({ error: "יש להזין הודעה (עד 4000 תווים)" }, { status: 400 });
   }
+  // Mask before any persistence — Gemini reads this turn back from history,
+  // so masking here also covers what the model sees, with no second call site.
+  const sanitizedMessage = maskPii(message);
 
   const recentCount = await prisma.chatMessage.count({
     where: {
@@ -103,7 +114,7 @@ export async function POST(req: Request) {
     conversationId = body.conversationId;
   } else {
     const conversation = await prisma.conversation.create({
-      data: { userId, title: message.slice(0, 80) },
+      data: { userId, title: sliceMaskSafe(sanitizedMessage, 80) },
       select: { id: true },
     });
     conversationId = conversation.id;
@@ -111,7 +122,7 @@ export async function POST(req: Request) {
 
   // Persist the user turn before streaming so it survives any failure below.
   await prisma.chatMessage.create({
-    data: { conversationId, role: "USER", content: message.slice(0, STORED_MESSAGE_MAX_CHARS) },
+    data: { conversationId, role: "USER", content: sliceMaskSafe(sanitizedMessage, STORED_MESSAGE_MAX_CHARS) },
   });
 
   // History window includes the just-persisted user turn — it is the final
@@ -153,7 +164,13 @@ export async function POST(req: Request) {
 
       const deadline = Date.now() + STREAM_DEADLINE_MS;
       let fullText = "";
-      const toolRecords: { name: string; args: unknown; ok: boolean; ms: number }[] = [];
+      // args is intentionally not tracked here — never persisted (see spec:
+      // partial search fragments can't be reliably masked, so they're dropped
+      // instead).
+      const toolRecords: { name: string; ok: boolean; ms: number }[] = [];
+      // PII values seen in tool results this turn (unmasked live — staff are
+      // authorized), collected only to mask persisted assistant text.
+      const collectedPii = new Map<string, PiiTag>();
 
       try {
         send("meta", { conversationId });
@@ -206,7 +223,8 @@ export async function POST(req: Request) {
               ? { error: "תם הזמן הכולל שהוקצב לבדיקה" }
               : await executeAssistantTool(name, (call.args ?? {}) as Record<string, unknown>, { role });
             const ok = !("error" in result);
-            toolRecords.push({ name, args: call.args ?? {}, ok, ms: Date.now() - started });
+            collectPiiValues(result, collectedPii);
+            toolRecords.push({ name, ok, ms: Date.now() - started });
             send("tool", { name, status: "end", ok });
             responseParts.push({ functionResponse: { name, response: result } });
           }
@@ -238,7 +256,7 @@ export async function POST(req: Request) {
               data: {
                 conversationId,
                 role: "ASSISTANT",
-                content: fullText.slice(0, STORED_MESSAGE_MAX_CHARS),
+                content: sliceMaskSafe(maskPii(fullText, collectedPii), STORED_MESSAGE_MAX_CHARS),
                 toolCalls: toolRecords.length ? JSON.parse(JSON.stringify(toolRecords)) : undefined,
               },
               select: { id: true },
