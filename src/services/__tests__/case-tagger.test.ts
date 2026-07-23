@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   addTag,
@@ -256,9 +257,7 @@ test("filterCasesByTags: never mutates input arrays", () => {
 // ─── createJsonlAuditWriter ──────────────────────────────────────────────────
 
 test("createJsonlAuditWriter: appends JSON lines that round-trip parse", () => {
-  const scratch =
-    "/tmp/claude-1000/-home-moti-projects-SmartCase/e3886fc3-8a7a-4818-8b28-93ad3f7ad241/scratchpad";
-  const dir = mkdtempSync(join(scratch, "audit-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "audit-test-"));
   const file = join(dir, "case-events.jsonl");
   try {
     const write = createJsonlAuditWriter(file);
