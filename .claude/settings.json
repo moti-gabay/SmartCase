@@ -40,6 +40,16 @@
     "smartcase"
   ],
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"[Session Initialization] Working branch: $(git branch --show-current)\""
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
