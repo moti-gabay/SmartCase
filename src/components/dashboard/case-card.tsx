@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { cn, formatDate, isDateOverdue } from "@/lib/utils";
-import { PriorityBadge } from "@/components/ui/badge";
+import { PriorityBadge, TagBadge } from "@/components/ui/badge";
 import { CASE_TYPE_LABELS } from "@/lib/constants";
 import { AlertTriangle, Clock, User, Calendar } from "lucide-react";
 import type { CaseSummary } from "@/types";
@@ -52,6 +52,18 @@ export function CaseCard({ caseItem }: CaseCardProps) {
                 <Clock className="h-3 w-3" />
                 באיחור
               </span>
+            )}
+          </div>
+        )}
+
+        {/* Tags */}
+        {caseItem.tags.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1">
+            {caseItem.tags.slice(0, 3).map((tag) => (
+              <TagBadge key={tag.id} tag={tag} />
+            ))}
+            {caseItem.tags.length > 3 && (
+              <span className="text-[11px] text-slate-400">+{caseItem.tags.length - 3}</span>
             )}
           </div>
         )}

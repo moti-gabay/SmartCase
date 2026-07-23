@@ -1,5 +1,7 @@
 // Shared TypeScript types for the SmartCase application
 
+import type { CaseTag } from "./case-tags";
+
 export type UserRole = "ADMIN" | "SUPERVISOR" | "AGENT";
 export type UserStatus = "PENDING_APPROVAL" | "APPROVED" | "SUSPENDED";
 export type Gender = "MALE" | "FEMALE" | "OTHER";
@@ -116,6 +118,7 @@ export interface CaseSummary {
   missingDocsCount: number;
   createdAt: string;
   updatedAt: string;
+  tags: CaseTag[];
 }
 
 export interface DashboardStats {
@@ -287,6 +290,7 @@ export interface CaseDetail {
   portalStep: CaseStep;
   createdAt: string;
   updatedAt: string;
+  tags: CaseTag[];
 
   client: {
     id: string;

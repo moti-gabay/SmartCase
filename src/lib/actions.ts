@@ -11,6 +11,9 @@ import { CASE_STEP_LABELS } from "@/lib/constants";
 import { logCaseActivity } from "@/lib/activity";
 import { sendDocumentRejectionEmail } from "@/lib/notifications";
 import type { CaseStatus, CaseStep, CaseType, Priority, TaskStatus, Gender, EmploymentStatus, UserRole, UserStatus } from "@/types";
+import { addTag, removeTag, TAG_COLOR_PALETTE, type AuditWriter } from "@/lib/case-tagger";
+import { createJsonlAuditWriter } from "@/lib/case-tagger-audit";
+import { deriveTagId, parseCaseTags, TAG_CATEGORIES, type CaseTag, type TaggedCase } from "@/types/case-tags";
 
 // Best-effort removal of S3 objects; never let a storage error break the DB action.
 async function deleteObjectsQuiet(keys: (string | null | undefined)[]): Promise<void> {
@@ -763,6 +766,131 @@ export async function adminDeleteUser(targetId: string) {
   }
 
   revalidatePath("/admin/users");
+}
+
+// ─── Case tags ────────────────────────────────────────────────────────────────
+// Server Actions delegate all validation to the pure engine in case-tagger.ts;
+// this layer only does Zod input shape-checking, id/createdAt derivation, and
+// persistence. Every expected failure (auth, missing case, engine rejection)
+// returns { error } — never throws — so the client editor never needs a
+// generic error boundary for a duplicate-tag submit.
+
+const addCaseTagSchema = z.object({
+  label: z.string().trim().min(1).max(40),
+  category: z.enum(TAG_CATEGORIES),
+  color: z.enum(TAG_COLOR_PALETTE),
+});
+
+export type AddCaseTagInput = z.infer<typeof addCaseTagSchema>;
+
+// Wraps the JSONL audit writer so a read-only prod FS (append failure) never
+// fails the mutation itself — log-only degradation.
+function safeAuditWriter(): AuditWriter {
+  const write = createJsonlAuditWriter();
+  return (event) => {
+    try {
+      write(event);
+    } catch (e) {
+      console.error("[case-tag audit]", e);
+    }
+  };
+}
+
+// Minimal stub satisfying TaggedCase — the engine only reads/writes `.tags`
+// (and echoes `.id` into audit/error messages), so the rest of CaseSummary is
+// irrelevant to a mutation scoped to the tags array.
+function tagsHost(caseId: string, tags: CaseTag[]): TaggedCase {
+  return { id: caseId, tags } as unknown as TaggedCase;
+}
+
+export async function addCaseTag(
+  caseId: string,
+  input: AddCaseTagInput
+): Promise<{ error?: string }> {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) return { error: "יש להתחבר מחדש" };
+
+  const parsed = addCaseTagSchema.safeParse(input);
+  if (!parsed.success) return { error: "פרטי התגית אינם תקינים" };
+  const data = parsed.data;
+
+  const caseRow = await prisma.case.findUnique({ where: { id: caseId }, select: { tags: true } });
+  if (!caseRow) return { error: "התיק לא נמצא" };
+
+  const existingTags = parseCaseTags(caseRow.tags);
+  const tag: CaseTag = {
+    id: deriveTagId(data.category, data.label),
+    label: data.label.trim(),
+    category: data.category,
+    color: data.color,
+    createdAt: new Date().toISOString(),
+  };
+
+  // Validate through the pure engine WITHOUT its audit hook — a rejection
+  // never reaches the DB, and a success is only audited after persist
+  // actually commits (see the safeAuditWriter call below).
+  let nextTags: CaseTag[];
+  try {
+    nextTags = addTag(tagsHost(caseId, existingTags), tag).tags;
+  } catch {
+    safeAuditWriter()({
+      timestamp: new Date().toISOString(),
+      action: "TAG_REJECTED",
+      caseId,
+      tagId: tag.id,
+      label: tag.label,
+      actor: session.user.name ?? userId,
+      reason: "duplicate",
+    });
+    return { error: "תגית כפולה — התגית כבר קיימת בתיק" };
+  }
+
+  await prisma.case.update({ where: { id: caseId }, data: { tags: nextTags as object[] } });
+
+  safeAuditWriter()({
+    timestamp: new Date().toISOString(),
+    action: "TAG_ADDED",
+    caseId,
+    tagId: tag.id,
+    label: tag.label,
+    actor: session.user.name ?? userId,
+  });
+
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
+  return {};
+}
+
+export async function removeCaseTag(caseId: string, tagId: string): Promise<{ error?: string }> {
+  const session = await auth();
+  const userId = session?.user?.id;
+  if (!userId) return { error: "יש להתחבר מחדש" };
+  if (!tagId) return { error: "תגית לא תקינה" };
+
+  const caseRow = await prisma.case.findUnique({ where: { id: caseId }, select: { tags: true } });
+  if (!caseRow) return { error: "התיק לא נמצא" };
+
+  const existingTags = parseCaseTags(caseRow.tags);
+  const removedTag = existingTags.find((t) => t.id === tagId);
+  // Absent tag → no-op per spec I/O matrix: no write, no revalidate, no error.
+  if (!removedTag) return {};
+  const nextTags = removeTag(tagsHost(caseId, existingTags), tagId).tags;
+
+  await prisma.case.update({ where: { id: caseId }, data: { tags: nextTags as object[] } });
+
+  safeAuditWriter()({
+    timestamp: new Date().toISOString(),
+    action: "TAG_REMOVED",
+    caseId,
+    tagId: removedTag.id,
+    label: removedTag.label,
+    actor: session.user.name ?? userId,
+  });
+
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
+  return {};
 }
 
 // NOTE: the public conversion-portal submission logic (profile + children) lives

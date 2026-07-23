@@ -269,6 +269,10 @@ model Case {
   updatedAt                DateTime   @updatedAt
   closedAt                 DateTime?
 
+  // Case tags (see src/types/case-tags.ts) — small, ad-hoc labels; no dedicated
+  // table per human decision (see spec-case-tagging-ui.md).
+  tags                     Json       @default("[]")
+
   // Public client-portal share link (see ConversionProfile). The token is a
   // high-entropy random bearer secret, not a field-level-encrypted value —
   // only its presence + expiry are checked, so encryption would add no
