@@ -7,10 +7,10 @@ import {
   addTag,
   removeTag,
   filterCasesByTags,
-  createJsonlAuditWriter,
   TAG_COLOR_PALETTE,
   type AuditWriter,
-} from "../case-tagger";
+} from "@/lib/case-tagger";
+import { createJsonlAuditWriter } from "@/lib/case-tagger-audit";
 import type { CaseTag, TaggedCase, TagColor } from "@/types/case-tags";
 import type { Priority } from "@/types/index";
 
@@ -63,7 +63,7 @@ test("addTag: returns new case with tag, leaves input unchanged, audits TAG_ADDE
   const original = makeCase();
   const tag = makeTag();
 
-  const updated = addTag(original, tag, { audit: writer });
+  const updated = addTag(original, tag, { audit: writer, actor: "moti" });
 
   assert.equal(updated.tags.length, 1);
   assert.equal(updated.tags[0].id, "tag-1");
@@ -77,6 +77,13 @@ test("addTag: returns new case with tag, leaves input unchanged, audits TAG_ADDE
   assert.equal(events[0].caseId, "case-1");
   assert.equal(events[0].tagId, "tag-1");
   assert.equal(events[0].label, "דחוף");
+  assert.equal(events[0].actor, "moti");
+});
+
+test("addTag: actor defaults to system when not provided", () => {
+  const { writer, events } = captureAudit();
+  addTag(makeCase(), makeTag(), { audit: writer });
+  assert.equal(events[0].actor, "system");
 });
 
 test("addTag: rejects invalid color, throws and audits TAG_REJECTED", () => {
@@ -141,14 +148,19 @@ test("addTag: same label but different category is allowed", () => {
   assert.equal(events[0].action, "TAG_ADDED");
 });
 
+test("addTag: no audit writer is a valid no-op sink", () => {
+  const updated = addTag(makeCase(), makeTag());
+  assert.equal(updated.tags.length, 1);
+});
+
 // ─── removeTag ───────────────────────────────────────────────────────────────
 
-test("removeTag: removes tag and audits TAG_REMOVED", () => {
+test("removeTag: removes tag and audits TAG_REMOVED with actor", () => {
   const { writer, events } = captureAudit();
   const tag = makeTag();
   const caseItem = makeCase({ tags: [tag] });
 
-  const updated = removeTag(caseItem, "tag-1", { audit: writer });
+  const updated = removeTag(caseItem, "tag-1", { audit: writer, actor: "moti" });
 
   assert.equal(updated.tags.length, 0);
   assert.equal(caseItem.tags.length, 1); // input unchanged
@@ -156,6 +168,7 @@ test("removeTag: removes tag and audits TAG_REMOVED", () => {
   assert.equal(events.length, 1);
   assert.equal(events[0].action, "TAG_REMOVED");
   assert.equal(events[0].tagId, "tag-1");
+  assert.equal(events[0].actor, "moti");
 });
 
 test("removeTag: absent id returns same reference and writes no audit event", () => {
@@ -196,7 +209,7 @@ test("filterCasesByTags: AND requires every tag, OR requires at least one", () =
   assert.deepEqual(orResult.map((c) => c.id), ["both", "one"]);
 });
 
-test("filterCasesByTags: maxPerCategory caps per category and keeps input order", () => {
+test("filterCasesByTags: maxPerCategory caps per category, input order when unsorted", () => {
   const u = (id: string) => makeTag({ id, category: "URGENCY", label: id });
   const c1 = makeCase({ id: "c1", tags: [u("uA")] });
   const c2 = makeCase({ id: "c2", tags: [u("uB")] });
@@ -211,6 +224,24 @@ test("filterCasesByTags: maxPerCategory caps per category and keeps input order"
 
   // First two in URGENCY category kept, in input order.
   assert.deepEqual(result.map((c) => c.id), ["c1", "c2"]);
+});
+
+test("filterCasesByTags: maxPerCategory + sortByPriority keeps top-N most urgent per category", () => {
+  const u = (id: string) => makeTag({ id, category: "URGENCY", label: id });
+  // LOW case first in input order — must NOT evict the later URGENT one.
+  const low = makeCase({ id: "low", priority: "LOW", tags: [u("uA")] });
+  const medium = makeCase({ id: "medium", priority: "MEDIUM", tags: [u("uB")] });
+  const urgent = makeCase({ id: "urgent", priority: "URGENT", tags: [u("uC")] });
+  const cases = [low, medium, urgent];
+
+  const result = filterCasesByTags(cases, {
+    tagIds: ["uA", "uB", "uC"],
+    mode: "OR",
+    maxPerCategory: 2,
+    sortByPriority: true,
+  });
+
+  assert.deepEqual(result.map((c) => c.id), ["urgent", "medium"]);
 });
 
 test("filterCasesByTags: sortByPriority orders URGENT→LOW with updatedAt desc tie-break", () => {
@@ -267,6 +298,7 @@ test("createJsonlAuditWriter: appends JSON lines that round-trip parse", () => {
       caseId: "case-1",
       tagId: "tag-1",
       label: "דחוף",
+      actor: "moti",
     });
     write({
       timestamp: "2026-01-01T00:00:01.000Z",
@@ -274,6 +306,7 @@ test("createJsonlAuditWriter: appends JSON lines that round-trip parse", () => {
       caseId: "case-1",
       tagId: "tag-1",
       label: "דחוף",
+      actor: "moti",
     });
 
     const lines = readFileSync(file, "utf8").trim().split("\n");
@@ -282,6 +315,7 @@ test("createJsonlAuditWriter: appends JSON lines that round-trip parse", () => {
     assert.equal(parsed[0].action, "TAG_ADDED");
     assert.equal(parsed[1].action, "TAG_REMOVED");
     assert.equal(parsed[0].label, "דחוף");
+    assert.equal(parsed[0].actor, "moti");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
