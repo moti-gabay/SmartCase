@@ -29,6 +29,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ inputs.pr_number }}
         run: |
+          if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "Error: Invalid PR_NUMBER '$PR_NUMBER'. It must be a positive integer."
+            exit 1
+          fi
+
           gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --json headRefName,baseRefName,headRepository \
             --jq '"head_ref=\(.headRefName)\nbase_ref=\(.baseRefName)"' >> "$GITHUB_OUTPUT"
