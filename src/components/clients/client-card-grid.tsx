@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cn, formatDate } from "@/lib/utils";
+import { cn, formatDate, calculateAge } from "@/lib/utils";
 import { StatusBadge } from "@/components/ui/badge";
 import { EMPLOYMENT_STATUS_LABELS, CASE_TYPE_LABELS } from "@/lib/constants";
 import type { ClientListItem } from "@/types";
@@ -28,9 +28,7 @@ function Avatar({ name, id }: { name: string; id: string }) {
 }
 
 function ClientCard({ client }: { client: ClientListItem }) {
-  const age = Math.floor(
-    (Date.now() - new Date(client.dateOfBirth).getTime()) / (1000 * 60 * 60 * 24 * 365.25)
-  );
+  const age = calculateAge(client.dateOfBirth);
 
   return (
     <div className={cn(

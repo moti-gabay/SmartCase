@@ -25,17 +25,18 @@ export function Header({ title, subtitle }: HeaderProps) {
   const [results, setResults] = useState<{ clients: ClientHit[]; cases: CaseHit[] }>({ clients: [], cases: [] });
   const boxRef = useRef<HTMLDivElement>(null);
 
-  // Debounced search
+  // Debounced search (all setState happens inside the timeout, never
+  // synchronously in the effect body; short queries clear on the next tick).
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 2) {
-      setResults({ clients: [], cases: [] });
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
+      if (q.length < 2) {
+        setResults({ clients: [], cases: [] });
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctrl.signal });
         if (res.ok) setResults(await res.json());
@@ -44,7 +45,7 @@ export function Header({ title, subtitle }: HeaderProps) {
       } finally {
         setLoading(false);
       }
-    }, 250);
+    }, q.length < 2 ? 0 : 250);
     return () => { clearTimeout(t); ctrl.abort(); };
   }, [query]);
 

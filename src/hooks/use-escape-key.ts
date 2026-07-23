@@ -8,7 +8,9 @@ import { useEffect, useRef } from "react";
 // without re-subscribing the listener on every keystroke/render.
 export function useEscapeKey(active: boolean, onEscape: () => void) {
   const onEscapeRef = useRef(onEscape);
-  onEscapeRef.current = onEscape;
+  useEffect(() => {
+    onEscapeRef.current = onEscape;
+  });
 
   useEffect(() => {
     if (!active) return;

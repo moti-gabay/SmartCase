@@ -2,7 +2,7 @@
 
 import { useState, useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { cn, formatDate } from "@/lib/utils";
+import { cn, formatDate, isWithinDays } from "@/lib/utils";
 import { DocStatusBadge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
@@ -135,9 +135,7 @@ function ChecklistRow({
   const Icon = DOC_ICONS[item.documentType] ?? FileText;
   const doc = item.document;
 
-  const isExpiryWarning =
-    doc?.expiryDate &&
-    new Date(doc.expiryDate).getTime() - Date.now() < 1000 * 60 * 60 * 24 * 30;
+  const isExpiryWarning = doc?.expiryDate && isWithinDays(doc.expiryDate, 30);
 
   return (
     <div className={cn("rounded-xl border transition-all", ROW_STYLE[item.status])}>

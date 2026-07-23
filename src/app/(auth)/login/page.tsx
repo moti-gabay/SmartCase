@@ -115,7 +115,7 @@ export default function LoginPage() {
           {/* Email */}
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700">
-              כתובת דוא"ל
+              כתובת דוא&quot;ל
             </label>
             <input
               {...register("email")}

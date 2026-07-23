@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import { useMobileSidebar } from "@/components/layout/mobile-sidebar-context";
@@ -48,21 +48,24 @@ interface SidebarProps {
 // behavior (inert, dialog semantics, focus trap, scroll lock) must key off
 // real viewport width, not just `mobileOpen`, or it would also fire against
 // the always-visible desktop layout.
+const DESKTOP_QUERY = "(min-width: 768px)";
+
+function subscribeToViewport(onChange: () => void) {
+  const mql = window.matchMedia(DESKTOP_QUERY);
+  mql.addEventListener("change", onChange);
+  return () => mql.removeEventListener("change", onChange);
+}
+
 function useIsDesktopViewport() {
-  const [isDesktop, setIsDesktop] = useState(false);
-  useEffect(() => {
-    const mql = window.matchMedia("(min-width: 768px)");
-    setIsDesktop(mql.matches);
-    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
-    mql.addEventListener("change", onChange);
-    return () => mql.removeEventListener("change", onChange);
-  }, []);
-  return isDesktop;
+  return useSyncExternalStore(
+    subscribeToViewport,
+    () => window.matchMedia(DESKTOP_QUERY).matches,
+    () => false
+  );
 }
 
 export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
   const pathname   = usePathname();
-  const router     = useRouter();
   const { data: session } = useSession();
   const { open: mobileOpen, setOpen: setMobileOpen } = useMobileSidebar();
   const closeMobile = () => setMobileOpen(false);

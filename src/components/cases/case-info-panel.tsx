@@ -1,4 +1,4 @@
-import { cn, formatDate, formatCurrency } from "@/lib/utils";
+import { cn, formatDate, formatCurrency, calculateAge } from "@/lib/utils";
 import { PrintLetterhead } from "@/components/print/print-letterhead";
 import { PortalStepControl } from "@/components/cases/portal-step-control";
 import { CASE_STATUS_LABELS, CASE_TYPE_LABELS } from "@/lib/constants";
@@ -52,9 +52,7 @@ interface CaseInfoPanelProps {
 
 export function CaseInfoPanel({ caseDetail }: CaseInfoPanelProps) {
   const { client } = caseDetail;
-  const age = Math.floor(
-    (Date.now() - new Date(client.dateOfBirth).getTime()) / (1000 * 60 * 60 * 24 * 365.25)
-  );
+  const age = calculateAge(client.dateOfBirth);
 
   return (
     <div className="flex flex-col gap-6 p-5">

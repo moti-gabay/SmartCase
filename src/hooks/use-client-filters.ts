@@ -22,14 +22,12 @@ export function useClientFilters(clients: ClientListItem[]) {
   const [page, setPage]             = useState(1);
   const [perPage, setPerPage]       = useState<(typeof PER_PAGE_OPTIONS)[number]>(10);
 
-  // Debounce search input by 220ms
+  // Debounce search input by 220ms. Page resets to 1 at every state-transition
+  // source (search commit, sort toggle, filter change) rather than via an effect.
   useEffect(() => {
-    const t = setTimeout(() => setSearch(rawSearch), 220);
+    const t = setTimeout(() => { setSearch(rawSearch); setPage(1); }, 220);
     return () => clearTimeout(t);
   }, [rawSearch]);
-
-  // Reset page when anything changes
-  useEffect(() => { setPage(1); }, [search, filters, sort]);
 
   // ── Filter + sort ────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -108,6 +106,7 @@ export function useClientFilters(clients: ClientListItem[]) {
         ? { field, dir: prev.dir === "asc" ? "desc" : "asc" }
         : { field, dir: "asc" }
     );
+    setPage(1);
   }, []);
 
   // ── Filter helpers ────────────────────────────────────────────────────────────
@@ -116,11 +115,13 @@ export function useClientFilters(clients: ClientListItem[]) {
     value: ClientFilters[K]
   ) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
+    setPage(1);
   }, []);
 
   const clearFilters = useCallback(() => {
     setFilters(DEFAULT_FILTERS);
     setRawSearch("");
+    setPage(1);
   }, []);
 
   const hasActiveFilters =

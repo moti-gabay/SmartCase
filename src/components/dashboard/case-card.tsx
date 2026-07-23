@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { cn, formatDate, isDateOverdue } from "@/lib/utils";
-import { StatusBadge, PriorityBadge } from "@/components/ui/badge";
+import { PriorityBadge } from "@/components/ui/badge";
 import { CASE_TYPE_LABELS } from "@/lib/constants";
 import { AlertTriangle, Clock, User, Calendar } from "lucide-react";
 import type { CaseSummary } from "@/types";

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { CaseCard } from "@/components/dashboard/case-card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { deleteClient } from "@/lib/actions";
-import { formatDate, formatCurrency } from "@/lib/utils";
+import { formatDate, formatCurrency, calculateAge } from "@/lib/utils";
 import { GENDER_LABELS, EMPLOYMENT_STATUS_LABELS } from "@/lib/constants";
 import type { ClientDetail } from "@/types";
 import {
@@ -35,9 +35,7 @@ export function ClientProfile({ client }: { client: ClientDetail }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const age = Math.floor(
-    (Date.now() - new Date(client.dateOfBirth).getTime()) / (1000 * 60 * 60 * 24 * 365.25)
-  );
+  const age = calculateAge(client.dateOfBirth);
 
   const handleDelete = () => {
     setError(null);

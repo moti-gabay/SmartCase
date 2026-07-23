@@ -298,7 +298,7 @@ function ConversionPortalWizard({
       {view === "PROCESS_OVERVIEW" && <OverviewBody t={t} />}
       {view === "WIZARD_PERSONAL" && <PersonalBody t={t} client={client} form={form} set={set} />}
       {view === "WIZARD_FAMILY" && (
-        <FamilyBody t={t} form={form} set={set} children={children} addChild={addChild} removeChild={removeChild} setChild={setChild} />
+        <FamilyBody t={t} form={form} set={set} childRows={children} addChild={addChild} removeChild={removeChild} setChild={setChild} />
       )}
       {view === "WIZARD_BACKGROUND" && <BackgroundBody t={t} form={form} set={set} />}
       {view === "PERSONAL_STORY" && <StoryBody t={t} form={form} set={set} />}

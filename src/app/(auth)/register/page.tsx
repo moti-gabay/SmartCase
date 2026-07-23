@@ -107,7 +107,7 @@ export default function RegisterPage() {
 
           {/* Email */}
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">כתובת דוא"ל</label>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700">כתובת דוא&quot;ל</label>
             <input
               {...register("email")}
               type="email"
