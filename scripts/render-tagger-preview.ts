@@ -4,7 +4,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { addTag, filterCasesByTags, TAG_COLOR_PALETTE, type AuditWriter } from "../src/services/case-tagger";
+import { addTag, filterCasesByTags, TAG_COLOR_PALETTE, type AuditWriter } from "../src/lib/case-tagger";
 import type { CaseTag, TaggedCase } from "../src/types/case-tags";
 import type { Priority } from "../src/types/index";
 

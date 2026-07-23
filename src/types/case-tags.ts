@@ -6,8 +6,19 @@ import type { CaseSummary, Priority } from "./index";
 
 export type TagCategory = "DOMAIN" | "URGENCY" | "WORKFLOW" | "CLIENT" | "CUSTOM";
 
-/** Allowed tag colors — must stay a hex value from TAG_COLOR_PALETTE. */
-export type TagColor = `#${string}`;
+/** Allowed tag colors — the palette IS the type: invalid colors fail to compile. */
+export const TAG_COLOR_PALETTE = [
+  "#3b82f6",
+  "#22c55e",
+  "#ef4444",
+  "#f59e0b",
+  "#8b5cf6",
+  "#06b6d4",
+  "#ec4899",
+  "#64748b",
+] as const;
+
+export type TagColor = (typeof TAG_COLOR_PALETTE)[number];
 
 export interface CaseTag {
   id: string;
@@ -42,6 +53,8 @@ export interface TagAuditEvent {
   caseId: string;
   tagId: string;
   label: string;
+  /** Who performed the mutation (user id or name); "system" when automated. */
+  actor: string;
   reason?: string;
 }
 
