@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { CaseCard } from "./case-card";
 import { CASE_STATUS_LABELS, CASE_STATUS_DOT, PIPELINE_COLUMNS } from "@/lib/constants";
 import { ChevronDown } from "lucide-react";
-import type { CaseSummary, CaseStatus } from "@/types";
+import type { CaseSummary } from "@/types";
 
 interface PipelineBoardProps {
   cases: CaseSummary[];
@@ -24,7 +24,8 @@ export function PipelineBoard({ cases }: PipelineBoardProps) {
   const toggleColumn = (status: string) => {
     setCollapsedColumns((prev) => {
       const next = new Set(prev);
-      next.has(status) ? next.delete(status) : next.add(status);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
       return next;
     });
   };

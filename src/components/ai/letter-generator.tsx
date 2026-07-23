@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { PrintLetterhead } from "@/components/print/print-letterhead";
 import { LETTER_TYPE_LABELS } from "@/lib/constants";
@@ -24,21 +24,31 @@ export function LetterGenerator({ caseId, clientName }: { caseId?: string; clien
   const [chatInput, setChatInput] = useState("");
   const [refining, setRefining] = useState(false);
 
-  // Reset the refinement chat whenever the displayed letter changes.
-  useEffect(() => { setChat([]); setChatInput(""); }, [current?.id]);
-
-  const loadLetters = useCallback(async () => {
-    if (!caseId) { setLetters([]); return; }
-    try {
-      const res = await fetch(`/api/ai/letter?caseId=${caseId}`);
-      if (res.ok) setLetters((await res.json()).letters ?? []);
-    } catch { /* ignore */ }
-  }, [caseId]);
+  // Reset the refinement chat whenever the displayed letter changes, and the
+  // selection whenever the case changes — adjusted during render (the React
+  // "adjusting state when a prop changes" pattern) instead of via effects.
+  const [prevLetterId, setPrevLetterId] = useState(current?.id);
+  if (prevLetterId !== current?.id) {
+    setPrevLetterId(current?.id);
+    setChat([]);
+    setChatInput("");
+  }
+  const [prevCaseId, setPrevCaseId] = useState(caseId);
+  if (prevCaseId !== caseId) {
+    setPrevCaseId(caseId);
+    setCurrent(null);
+    setLetters([]);
+  }
 
   useEffect(() => {
-    setCurrent(null);
-    loadLetters();
-  }, [loadLetters]);
+    if (!caseId) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/ai/letter?caseId=${caseId}`);
+        if (res.ok) setLetters((await res.json()).letters ?? []);
+      } catch { /* ignore */ }
+    })();
+  }, [caseId]);
 
   const generate = async () => {
     if (!caseId) return;

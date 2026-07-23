@@ -1,6 +1,6 @@
 "use client";
 
-import { cn, formatDate } from "@/lib/utils";
+import { cn, formatDate, calculateAge } from "@/lib/utils";
 import {
   portalDict, translateChecklistLabel, translateChecklistDescription, type PortalLocale,
 } from "@/lib/i18n/conversion-portal";
@@ -120,7 +120,7 @@ export function OverviewBody({ t }: { t: Dict }) {
 export function PersonalBody({ t, client, form, set }: {
   t: Dict; client: PortalCaseView["client"]; form: PortalForm; set: Setter;
 }) {
-  const age = Math.floor((Date.now() - new Date(client.dateOfBirth).getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+  const age = calculateAge(client.dateOfBirth);
   return (
     <div className={card}>
       <h1 className={heading}><User className="h-5 w-5 text-indigo-500" /> {t.personalTitle}</h1>
@@ -149,9 +149,9 @@ export function PersonalBody({ t, client, form, set }: {
 }
 
 // ── Screen 4: WIZARD_FAMILY ──
-export function FamilyBody({ t, form, set, children, addChild, removeChild, setChild }: {
+export function FamilyBody({ t, form, set, childRows, addChild, removeChild, setChild }: {
   t: Dict; form: PortalForm; set: Setter;
-  children: ChildRow[];
+  childRows: ChildRow[];
   addChild: () => void;
   removeChild: (i: number) => void;
   setChild: (i: number, k: keyof ChildRow, v: string) => void;
@@ -172,9 +172,9 @@ export function FamilyBody({ t, form, set, children, addChild, removeChild, setC
             <Plus className="h-3.5 w-3.5" /> {t.addChild}
           </button>
         </div>
-        {children.length === 0 && <p className="text-xs text-slate-400">{t.noChildren}</p>}
+        {childRows.length === 0 && <p className="text-xs text-slate-400">{t.noChildren}</p>}
         <div className="flex flex-col gap-2">
-          {children.map((c, i) => (
+          {childRows.map((c, i) => (
             <div key={i} className="flex items-center gap-2">
               <input className={inputCls} placeholder={t.childNamePlaceholder} value={c.fullName} onChange={(e) => setChild(i, "fullName", e.target.value)} />
               <input type="date" className={cn(inputCls, "max-w-[160px]")} value={c.dateOfBirth} onChange={(e) => setChild(i, "dateOfBirth", e.target.value)} />

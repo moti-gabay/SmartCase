@@ -5,6 +5,8 @@ import {
   formatDate,
   formatDatetime,
   isDateOverdue,
+  calculateAge,
+  isWithinDays,
   formatCurrency,
   generateCaseNumber,
 } from "../src/lib/utils";
@@ -29,6 +31,19 @@ test("formatDatetime includes date and HH:mm", () => {
 test("isDateOverdue: past is true, future is false", () => {
   assert.equal(isDateOverdue("2000-01-01T00:00:00Z"), true);
   assert.equal(isDateOverdue("2999-01-01T00:00:00Z"), false);
+});
+
+test("calculateAge computes whole years from a date of birth", () => {
+  const tenYearsAgo = new Date(Date.now() - 10.5 * 365.25 * 24 * 60 * 60 * 1000);
+  assert.equal(calculateAge(tenYearsAgo), 10);
+  assert.equal(calculateAge(new Date()), 0);
+});
+
+test("isWithinDays: true inside the window or already past, false beyond it", () => {
+  const day = 24 * 60 * 60 * 1000;
+  assert.equal(isWithinDays(new Date(Date.now() + 10 * day), 30), true);
+  assert.equal(isWithinDays(new Date(Date.now() - 5 * day), 30), true); // already past
+  assert.equal(isWithinDays(new Date(Date.now() + 60 * day), 30), false);
 });
 
 test("formatCurrency formats ILS with thousands separator and no decimals", () => {

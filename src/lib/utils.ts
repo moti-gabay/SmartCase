@@ -23,6 +23,17 @@ export function isDateOverdue(date: Date | string): boolean {
   return isPast(new Date(date));
 }
 
+export function calculateAge(dateOfBirth: Date | string): number {
+  return Math.floor(
+    (Date.now() - new Date(dateOfBirth).getTime()) / (1000 * 60 * 60 * 24 * 365.25)
+  );
+}
+
+// True when `date` falls within the next `days` days (or has already passed).
+export function isWithinDays(date: Date | string, days: number): boolean {
+  return new Date(date).getTime() - Date.now() < 1000 * 60 * 60 * 24 * days;
+}
+
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("he-IL", {
     style: "currency",

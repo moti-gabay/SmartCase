@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cn, formatDate } from "@/lib/utils";
+import { cn, formatDate, calculateAge } from "@/lib/utils";
 import { StatusBadge } from "@/components/ui/badge";
 import { EMPLOYMENT_STATUS_LABELS, CASE_TYPE_LABELS } from "@/lib/constants";
 import type { ClientListItem, SortField, ClientSort } from "@/types";
@@ -115,9 +115,7 @@ export function ClientTable({ clients, sort, onSort, emptyMessage }: ClientTable
 // ─── Single row ───────────────────────────────────────────────────────────────
 
 function TableRow({ client, striped }: { client: ClientListItem; striped: boolean }) {
-  const age = Math.floor(
-    (Date.now() - new Date(client.dateOfBirth).getTime()) / (1000 * 60 * 60 * 24 * 365.25)
-  );
+  const age = calculateAge(client.dateOfBirth);
 
   return (
     <tr

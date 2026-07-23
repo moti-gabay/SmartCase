@@ -135,7 +135,7 @@ export function CaseHeader({ caseDetail, checklistProgress, onStatusChange }: Ca
             )}
             {caseDetail.authorityReferenceNumber && (
               <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600">
-                ב"ל: {caseDetail.authorityReferenceNumber}
+                ב&quot;ל: {caseDetail.authorityReferenceNumber}
               </span>
             )}
           </div>

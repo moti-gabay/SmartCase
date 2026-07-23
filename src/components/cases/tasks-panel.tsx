@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { cn, formatDate, isDateOverdue } from "@/lib/utils";
 import { PriorityBadge } from "@/components/ui/badge";
-import { PRIORITY_LABELS } from "@/lib/constants";
 import type { TaskDetail, TaskStatus } from "@/types";
 import { CheckCircle2, Circle, Clock, AlertTriangle, Plus, User } from "lucide-react";
 
