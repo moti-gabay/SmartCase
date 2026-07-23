@@ -1,8 +1,16 @@
 name: Claude PR Review and Fix
 
+# Manual-only: automatic triggers disabled deliberately.
+# on:
+#   pull_request:
+#     types: [opened, synchronize, reopened]
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to review"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,13 +21,22 @@ jobs:
     runs-on: ubuntu-latest
     # Pushing fixes back requires write access to the PR's head branch, which the
     # default GITHUB_TOKEN only has for PRs opened from a branch within this repo
-    # (not from forks). That's why this uses `pull_request`, not `pull_request_target`.
+    # (not from forks) — so this only works for PRs from branches within this repo.
     steps:
+      - name: Resolve PR refs
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json headRefName,baseRefName,headRepository \
+            --jq '"head_ref=\(.headRefName)\nbase_ref=\(.baseRefName)"' >> "$GITHUB_OUTPUT"
+
       - name: Checkout PR branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ steps.pr.outputs.head_ref }}
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -43,9 +60,9 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          BASE_REF: ${{ steps.pr.outputs.base_ref }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
         run: |
           claude -p "You are reviewing pull request #$PR_NUMBER in this repository as an automated CI job. There is no human available to answer questions, so make reasonable decisions yourself and proceed.
 
