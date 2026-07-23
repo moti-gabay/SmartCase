@@ -52,6 +52,9 @@ next-env.d.ts
 # playwright MCP session artifacts
 .playwright-mcp/
 
+# structured audit/event logs
+logs/*.jsonl
+
 # session-summary hook output
 LAST_SESSION_SUMMARY.md
 _bmad-output/session-summaries/

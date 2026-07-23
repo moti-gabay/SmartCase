@@ -25,10 +25,37 @@ PATTERNS=(
   'xapp-[0-9A-Za-z-]+'                    # Slack app token
   'BEGIN[[:space:]]+([A-Z]+[[:space:]]+)?PRIVATE[[:space:]]+KEY'  # SSH/RSA/EC private key
 )
+# Rule name per pattern (same order as PATTERNS) — logged to the audit trail.
+RULES=(
+  'AWS_KEY'
+  'AWS_KEY'
+  'DB_CONNECTION'
+  'DB_CONNECTION'
+  'DB_CONNECTION'
+  'API_KEY'
+  'SLACK_TOKEN'
+  'SLACK_TOKEN'
+  'PRIVATE_KEY'
+)
 
-for pattern in "${PATTERNS[@]}"; do
-  if printf '%s' "$PROMPT" | grep -qE "$pattern"; then
-    echo "SECURITY BLOCK: your prompt appears to contain a secret (matched: $pattern). Remove the key/credential and resubmit." >&2
+log_block() {
+  # Append audit event; never let logging failure prevent the block (exit 2).
+  local rule="$1" repo_root
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  mkdir -p "$repo_root/logs" || return 0
+  jq -cn \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg rule "$rule" \
+    --arg user "${USER:-$(id -un)}" \
+    --arg branch "$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)" \
+    '{timestamp: $ts, event: "SECRET_LEAK_BLOCKED", rule: $rule, user: $user, branch: $branch}' \
+    >> "$repo_root/logs/security-audit.jsonl" || true
+}
+
+for i in "${!PATTERNS[@]}"; do
+  if printf '%s' "$PROMPT" | grep -qE "${PATTERNS[$i]}"; then
+    log_block "${RULES[$i]}"
+    echo "SECURITY BLOCK: your prompt appears to contain a secret (matched: ${PATTERNS[$i]}). Remove the key/credential and resubmit." >&2
     exit 2
   fi
 done
