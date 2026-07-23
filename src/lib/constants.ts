@@ -1,5 +1,7 @@
 // Hebrew labels for all enums used throughout the UI
 
+import type { TagCategory, TagColor } from "@/types/case-tags";
+
 // ─── User role & account status (admin user management) ───────────────────────
 
 export const USER_ROLE_LABELS: Record<string, string> = {
@@ -189,6 +191,27 @@ export const LETTER_TYPE_INSTRUCTIONS: Record<string, string> = {
   AUTHORITY_INQUIRY: "פנייה רשמית לבירור סטטוס התיק או קבלת מידע מהרשות.",
   COVER_LETTER:      "מכתב מלווה קצר ורשמי המצרף מסמכים לתיק.",
   OTHER:             "מכתב רשמי כללי בהתאם לפרטי הבקשה.",
+};
+
+export const TAG_CATEGORY_LABELS: Record<TagCategory, string> = {
+  DOMAIN:   "תחום",
+  URGENCY:  "דחיפות",
+  WORKFLOW: "תהליך עבודה",
+  CLIENT:   "לקוח",
+  CUSTOM:   "מותאם אישית",
+};
+
+// Hebrew color names for palette swatch aria-labels (hex → name), keyed to
+// TAG_COLOR_PALETTE in src/types/case-tags.ts.
+export const TAG_COLOR_NAMES: Record<TagColor, string> = {
+  "#3b82f6": "כחול",
+  "#22c55e": "ירוק",
+  "#ef4444": "אדום",
+  "#f59e0b": "כתום",
+  "#8b5cf6": "סגול",
+  "#06b6d4": "תכלת",
+  "#ec4899": "ורוד",
+  "#64748b": "אפור",
 };
 
 export const PIPELINE_COLUMNS = [

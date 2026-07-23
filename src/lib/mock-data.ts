@@ -18,6 +18,7 @@ export const MOCK_CASES: CaseSummary[] = [
     hasMissingDocuments: true, isOverdue: false, missingDocsCount: 3,
     nextFollowUpDate: "2024-12-05", submissionDeadline: null,
     createdAt: "2024-11-20T10:00:00Z", updatedAt: "2024-11-28T09:00:00Z",
+    tags: [],
   }
 ];
 

@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { cn } from "@/lib/utils";
-import { StatusBadge, PriorityBadge } from "@/components/ui/badge";
+import { StatusBadge, PriorityBadge, TagBadge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { deleteCase, generatePortalLink } from "@/lib/actions";
+import { deleteCase, generatePortalLink, addCaseTag, removeCaseTag } from "@/lib/actions";
 import { printSection } from "@/lib/print";
-import { CASE_STATUS_LABELS, CASE_TYPE_LABELS, PIPELINE_COLUMNS } from "@/lib/constants";
+import { CASE_STATUS_LABELS, CASE_TYPE_LABELS, PIPELINE_COLUMNS, TAG_CATEGORY_LABELS, TAG_COLOR_NAMES } from "@/lib/constants";
+import { TAG_COLOR_PALETTE, TAG_CATEGORIES } from "@/types/case-tags";
+import type { TagCategory } from "@/types/case-tags";
 import type { CaseDetail, CaseStatus } from "@/types";
 import {
   ChevronLeft,
@@ -29,6 +31,8 @@ import {
   Check,
   X,
   Loader2,
+  Tag as TagIcon,
+  Plus,
 } from "lucide-react";
 
 interface CaseHeaderProps {
@@ -52,6 +56,58 @@ export function CaseHeader({ caseDetail, checklistProgress, onStatusChange }: Ca
   const progressPct = checklistProgress.total > 0
     ? Math.round((checklistProgress.approved / checklistProgress.total) * 100)
     : 0;
+
+  // ─── Tag editor popover ──────────────────────────────────────────────────
+  const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
+  const [tagPending, startTagTransition] = useTransition();
+  const [tagLabel, setTagLabel] = useState("");
+  const [tagCategory, setTagCategory] = useState<TagCategory>("CUSTOM");
+  const [tagColor, setTagColor] = useState<(typeof TAG_COLOR_PALETTE)[number]>(TAG_COLOR_PALETTE[0]);
+  const [tagError, setTagError] = useState<string | null>(null);
+  const tagPopoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!tagPopoverOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTagPopoverOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [tagPopoverOpen]);
+
+  const handleAddTag = () => {
+    if (tagPending) return;
+    setTagError(null);
+    startTagTransition(async () => {
+      try {
+        const { error } = await addCaseTag(caseDetail.id, {
+          label: tagLabel,
+          category: tagCategory,
+          color: tagColor,
+        });
+        if (error) {
+          setTagError(error);
+          return;
+        }
+        setTagLabel("");
+      } catch {
+        setTagError("הוספת התגית נכשלה");
+      }
+    });
+  };
+
+  const handleRemoveTag = (tagId: string) => {
+    if (tagPending) return;
+    setTagError(null);
+    startTagTransition(async () => {
+      try {
+        const { error } = await removeCaseTag(caseDetail.id, tagId);
+        if (error) setTagError(error);
+      } catch {
+        setTagError("הסרת התגית נכשלה");
+      }
+    });
+  };
 
   const handleDelete = () => {
     startTransition(async () => {
@@ -137,6 +193,71 @@ export function CaseHeader({ caseDetail, checklistProgress, onStatusChange }: Ca
               <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600">
                 ב&quot;ל: {caseDetail.authorityReferenceNumber}
               </span>
+            )}
+          </div>
+
+          {/* Tags */}
+          <div className="relative flex flex-wrap items-center gap-1.5">
+            {caseDetail.tags.map((tag) => (
+              <TagBadge key={tag.id} tag={tag} onRemove={() => handleRemoveTag(tag.id)} />
+            ))}
+            <button
+              onClick={() => { setTagError(null); setTagPopoverOpen((v) => !v); }}
+              className="flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2 py-0.5 text-xs text-slate-500 hover:border-indigo-300 hover:text-indigo-600"
+            >
+              <TagIcon className="h-3 w-3" />
+              <Plus className="h-3 w-3" />
+              תגית
+            </button>
+            {tagError && !tagPopoverOpen && <p className="w-full text-xs text-red-600">{tagError}</p>}
+
+            {tagPopoverOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setTagPopoverOpen(false)} />
+                <div
+                  ref={tagPopoverRef}
+                  className="absolute start-0 top-full z-20 mt-1.5 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-lg"
+                >
+                  <div className="flex flex-col gap-2">
+                    <input
+                      type="text"
+                      value={tagLabel}
+                      onChange={(e) => setTagLabel(e.target.value)}
+                      placeholder="שם התגית"
+                      maxLength={40}
+                      className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                    />
+                    <select
+                      value={tagCategory}
+                      onChange={(e) => setTagCategory(e.target.value as TagCategory)}
+                      className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-sm text-slate-900 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                    >
+                      {TAG_CATEGORIES.map((cat) => (
+                        <option key={cat} value={cat}>{TAG_CATEGORY_LABELS[cat]}</option>
+                      ))}
+                    </select>
+                    <div className="flex items-center gap-1.5">
+                      {TAG_COLOR_PALETTE.map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          onClick={() => setTagColor(color)}
+                          aria-label={TAG_COLOR_NAMES[color]}
+                          className={cn(
+                            "h-6 w-6 rounded-full border-2",
+                            tagColor === color ? "border-slate-900" : "border-transparent"
+                          )}
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                    </div>
+                    {tagError && <p className="text-xs text-red-600">{tagError}</p>}
+                    <Button size="sm" onClick={handleAddTag} disabled={tagPending || !tagLabel.trim()}>
+                      {tagPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "הוסף תגית"}
+                    </Button>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </div>

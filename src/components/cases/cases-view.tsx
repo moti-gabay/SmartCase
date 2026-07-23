@@ -6,6 +6,8 @@ import { CaseCard } from "@/components/dashboard/case-card";
 import { CASE_STATUS_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { CaseSummary, CaseStatus } from "@/types";
+import type { CaseTag } from "@/types/case-tags";
+import { filterCasesByTags } from "@/lib/case-tagger";
 import { Search, FolderOpen } from "lucide-react";
 
 const FILTERS: { key: CaseStatus | "ALL" | "MISSING" | "OVERDUE"; label: string }[] = [
@@ -27,10 +29,37 @@ const FILTERS: { key: CaseStatus | "ALL" | "MISSING" | "OVERDUE"; label: string 
 export function CasesView({ cases }: { cases: CaseSummary[] }) {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("ALL");
   const [search, setSearch] = useState("");
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [tagMode, setTagMode] = useState<"AND" | "OR">("OR");
+
+  // Dedupe by stable tag id (same label+category across cases share one id).
+  const availableTags = useMemo(() => {
+    const byId = new Map<string, CaseTag>();
+    for (const c of cases) {
+      for (const tag of c.tags) {
+        if (!byId.has(tag.id)) byId.set(tag.id, tag);
+      }
+    }
+    return [...byId.values()];
+  }, [cases]);
+
+  // Derived, not stored: prunes selected tag ids that no longer exist among
+  // loaded cases (e.g. the last case carrying that tag was untagged/deleted)
+  // without a setState-in-effect render cascade.
+  const activeTagIds = useMemo(() => {
+    const availableIds = new Set(availableTags.map((t) => t.id));
+    return selectedTagIds.filter((id) => availableIds.has(id));
+  }, [selectedTagIds, availableTags]);
+
+  const toggleTag = (tagId: string) => {
+    setSelectedTagIds((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]
+    );
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return cases.filter((c) => {
+    const statusFiltered = cases.filter((c) => {
       if (filter === "MISSING" && !c.hasMissingDocuments) return false;
       else if (filter === "OVERDUE" && !c.isOverdue) return false;
       else if (filter !== "ALL" && filter !== "MISSING" && filter !== "OVERDUE" && c.status !== filter) return false;
@@ -41,7 +70,8 @@ export function CasesView({ cases }: { cases: CaseSummary[] }) {
         (c.assignedAgentName ?? "").toLowerCase().includes(q)
       );
     });
-  }, [cases, filter, search]);
+    return filterCasesByTags(statusFiltered, { tagIds: activeTagIds, mode: tagMode });
+  }, [cases, filter, search, activeTagIds, tagMode]);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -78,6 +108,34 @@ export function CasesView({ cases }: { cases: CaseSummary[] }) {
               </button>
             ))}
           </div>
+
+          {/* Tag chip filter */}
+          {availableTags.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              {availableTags.map((tag) => (
+                <button
+                  key={tag.id}
+                  onClick={() => toggleTag(tag.id)}
+                  className={cn(
+                    "rounded-full border px-3 py-1.5 text-xs font-medium transition-all",
+                    activeTagIds.includes(tag.id)
+                      ? "border-indigo-600 bg-indigo-600 text-white"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
+                  )}
+                >
+                  {tag.label}
+                </button>
+              ))}
+              {activeTagIds.length >= 2 && (
+                <button
+                  onClick={() => setTagMode((m) => (m === "AND" ? "OR" : "AND"))}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-indigo-300 hover:text-indigo-600"
+                >
+                  מצב: {tagMode === "AND" ? "הכל (AND)" : "לפחות אחד (OR)"}
+                </button>
+              )}
+            </div>
+          )}
 
           <p className="text-xs text-slate-400">{filtered.length} תיקים</p>
 

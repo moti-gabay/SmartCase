@@ -16,6 +16,7 @@ import type {
   CaseStep,
   DocumentStatus,
 } from "@/types";
+import { parseCaseTags } from "@/types/case-tags";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -98,6 +99,7 @@ const caseSummarySelect = {
   submissionDeadline: true,
   createdAt: true,
   updatedAt: true,
+  tags: true,
   client: { select: { fullName: true } },
   assignedAgent: { select: { name: true } },
   _count: {
@@ -125,6 +127,7 @@ function toCaseSummary(c: any): CaseSummary {
     missingDocsCount: c._count?.checklist ?? 0,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
+    tags: parseCaseTags(c.tags),
   };
 }
 
@@ -349,6 +352,7 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
     portalStep: c.portalStep,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
+    tags: parseCaseTags(c.tags),
 
     client: {
       id: c.client.id,

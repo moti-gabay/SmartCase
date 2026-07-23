@@ -7,6 +7,8 @@ import {
   DOCUMENT_STATUS_LABELS,
 } from "@/lib/constants";
 import type { CaseStatus, Priority, DocumentStatus } from "@/types";
+import type { CaseTag } from "@/types/case-tags";
+import { X } from "lucide-react";
 
 interface StatusBadgeProps {
   status: CaseStatus;
@@ -81,6 +83,38 @@ export function DocStatusBadge({ status, className }: DocStatusBadgeProps) {
       )}
     >
       {DOCUMENT_STATUS_LABELS[status]}
+    </span>
+  );
+}
+
+interface TagBadgeProps {
+  tag: CaseTag;
+  onRemove?: () => void;
+  className?: string;
+}
+
+// Renders the palette hex as a light tint background + border, but text stays
+// a neutral readable gray — never hex-colored text on its own tint (contrast).
+export function TagBadge({ tag, onRemove, className }: TagBadgeProps) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-gray-700",
+        className
+      )}
+      style={{ backgroundColor: `${tag.color}1a`, borderColor: tag.color }}
+    >
+      {tag.label}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`הסר תגית ${tag.label}`}
+          className="rounded-full p-0.5 text-gray-500 hover:bg-black/5 hover:text-gray-700"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
     </span>
   );
 }
