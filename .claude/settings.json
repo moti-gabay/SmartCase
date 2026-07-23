@@ -1,5 +1,5 @@
 {
-  "effortLevel": "medium",
+  "effortLevel": "low",
   "permissions": {
     "allow": [
       "Bash(npm --version)",
@@ -49,7 +49,25 @@
       "Bash(git push origin master --force)",
       "Bash(git reset --hard origin/*)",
       "Bash(npx prisma migrate reset*)",
-      "Bash(rm -rf *)"
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(rm -r *)",
+      "Bash(psql *)",
+      "Bash(mysql *)",
+      "Bash(sqlite3 *)",
+      "Bash(mongosh *)",
+      "Bash(prisma db execute*)",
+      "Bash(prisma db push*)",
+      "Bash(npx prisma db execute*)",
+      "Bash(npx prisma db push*)",
+      "Read(**/.env*)",
+      "Read(**/*.env)",
+      "Bash(cat .env*)",
+      "Bash(cat *.env)",
+      "Bash(grep * .env*)",
+      "Bash(less .env*)",
+      "Bash(head .env*)",
+      "Bash(tail .env*)"
     ]
   },
   "enabledMcpjsonServers": [
@@ -60,6 +78,19 @@
     "smartcase"
   ],
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/security-bash-env-check.sh",
+            "timeout": 10,
+            "statusMessage": "Checking command for .env access..."
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
