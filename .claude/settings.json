@@ -60,6 +60,18 @@
     "smartcase"
   ],
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/security-prompt-check.sh",
+            "timeout": 10,
+            "statusMessage": "Scanning prompt for secrets..."
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
