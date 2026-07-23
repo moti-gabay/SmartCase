@@ -58,3 +58,6 @@ logs/*.jsonl
 # session-summary hook output
 LAST_SESSION_SUMMARY.md
 _bmad-output/session-summaries/
+
+# generated UI-verification artifacts
+/_bmad-output/
