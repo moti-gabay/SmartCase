@@ -109,6 +109,22 @@ notify_slack() {
   text=$(printf '%s\n\n*Modified files:*\n```\n%s\n```\n\n*Recent commits:*\n```\n%s\n```' \
     "$header" "${status_lines:-none}" "${commits:-none}")
 
+  # Dedupe: a long session hits Stop on every turn, so suppress a post that is
+  # identical to the last one, and rate-limit even changed content to 1/15 min.
+  # State lives in .git/ so it is never committed. StopFailure always posts.
+  if [ "$EVENT" != "StopFailure" ]; then
+    local state_file fp last_fp last_at now
+    state_file="$REPO_ROOT/.git/smartcase-slack-notify.state"
+    fp=$(printf '%s' "$text" | cksum | tr -d ' ')
+    now=$(date +%s)
+    if [ -f "$state_file" ]; then
+      read -r last_fp last_at < "$state_file" 2>/dev/null || true
+      [ "$fp" = "${last_fp:-}" ] && return 0
+      [ $((now - ${last_at:-0})) -lt 900 ] && return 0
+    fi
+    echo "$fp $now" > "$state_file" 2>/dev/null
+  fi
+
   if [ -n "$webhook" ]; then
     curl -sS -m 8 -X POST -H 'Content-type: application/json' \
       --data "$(jq -n --arg text "$text" '{text: $text}')" \
