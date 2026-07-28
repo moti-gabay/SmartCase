@@ -34,9 +34,19 @@ jobs:
             exit 1
           fi
 
-          gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --json headRefName,baseRefName,headRepository \
-            --jq '"head_ref=\(.headRefName)\nbase_ref=\(.baseRefName)"' >> "$GITHUB_OUTPUT"
+          PR_JSON="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json headRefName,baseRefName,isCrossRepository)"
+
+          # Fork PRs must be refused, not merely unsupported. `headRefName` for a
+          # fork PR is the *fork's* branch name, which the checkout below resolves
+          # against THIS repo — a fork PR opened from its own `main` would check
+          # out our `main` and step 4 would push auto-fix commits straight to it.
+          if [ "$(jq -r '.isCrossRepository' <<<"$PR_JSON")" != "false" ]; then
+            echo "Error: PR #$PR_NUMBER comes from a fork. Refusing — the head ref would resolve to a same-named branch in this repository."
+            exit 1
+          fi
+
+          jq -r '"head_ref=\(.headRefName)\nbase_ref=\(.baseRefName)"' <<<"$PR_JSON" >> "$GITHUB_OUTPUT"
 
       - name: Checkout PR branch
         uses: actions/checkout@v4
