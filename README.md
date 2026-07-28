@@ -2,7 +2,7 @@
 
 SmartCase is the foundation of a proactive, multi-tenant SaaS ecosystem for law and consulting firms, spanning 7 core domains — including National Insurance, Guardianship, and Conversion — across medical, legal, and bureaucratic casework. Today it runs as a single-office Hebrew (RTL) CRM live across 2 of those domains (National Insurance disability claims, Conversion): case agents track clients, cases, required documents, and tasks, and use Claude to validate uploaded documents and draft official Hebrew letters.
 
-UI copy, enum labels, and AI prompts are all in Hebrew. See [ROLES.md](ROLES.md) for the project roles and personas, and [CLAUDE.md](CLAUDE.md) for full technical specs and engineering invariants.
+UI copy, enum labels, and AI prompts are all in Hebrew. See [ROLES.md](ROLES.md) for the project roles and personas, [CLAUDE.md](CLAUDE.md) for full technical specs and engineering invariants, and [CONTRACT.md](CONTRACT.md) for the Team Agent Responsibility Contract (ARC) governing AI-agent autonomy in this repo.
 
 ## Tech stack
 
@@ -13,6 +13,8 @@ UI copy, enum labels, and AI prompts are all in Hebrew. See [ROLES.md](ROLES.md)
 - **UI**: Tailwind CSS v4 + `tailwindcss-rtl`, Radix UI primitives, `react-hook-form` + Zod
 - **Email**: Resend, localized per client
 - **Printing/PDF**: native browser `window.print()` only — no canvas-rasterization libraries (breaks Hebrew RTL text)
+- **Case tagging**: pure client-safe add/remove/filter engine ([src/lib/case-tagger.ts](src/lib/case-tagger.ts)) over a typed tag model ([src/types/case-tags.ts](src/types/case-tags.ts)), with an injectable server-only JSONL audit sink; surfaced in the UI as case badges, filter chips, and an inline tag editor
+- **Testing**: Node's built-in runner (`node:test`) via `tsx` — `npm test` covers the pure/deterministic logic (utils, constants integrity, S3 signer, PII sanitizer, chat protocol, i18n locale, journey, case tagger). DB queries, API routes, and React components are covered by manual E2E
 
 ## Claude Code tooling (MCP / Skills / Commands)
 
@@ -46,7 +48,22 @@ Team-shared, committed at repo level. Secrets are **never** committed — `.mcp.
 
 The [BMAD-METHOD](https://github.com/bmad-method) framework is also installed under `.claude/skills/` (`bmad-*`), adding agent personas (analyst, architect, PM, dev, UX designer, tech writer, etc.) and workflow skills for planning, spec/PRD authoring, story-driven dev, and adversarial code review — invoked by name (e.g. "talk to Winston") or by skill trigger phrase (e.g. "create a spec", "run a retrospective").
 
-A `Stop`/`StopFailure` hook ([.claude/settings.json](.claude/settings.json) → [.claude/hooks/session-summary.sh](.claude/hooks/session-summary.sh)) posts an end-of-session summary at the close of every Claude Code session.
+**Hooks** ([.claude/settings.json](.claude/settings.json)) — an active, multi-layered guardrail system (see [CONTRACT.md](CONTRACT.md) §3):
+
+| Hook | Script | Purpose |
+|---|---|---|
+| `PreToolUse` (Bash) | [scripts/security-bash-env-check.sh](scripts/security-bash-env-check.sh) | Hard-blocks any Bash command that would read, print, or leak `.env` files or environment secrets |
+| `UserPromptSubmit` | [scripts/security-prompt-check.sh](scripts/security-prompt-check.sh) | Scans prompts for pasted secrets before they reach the model |
+| `SessionStart` | inline | Announces the current working branch (branching discipline: never work on `main`) |
+| `Stop` / `StopFailure` | [.claude/hooks/session-summary.sh](.claude/hooks/session-summary.sh) | Posts an end-of-session summary to Slack |
+
+Permission `allow`/`ask`/`deny` rules are committed alongside the hooks in the same settings file.
+
+**Other automation**:
+
+- [.github/workflows/claude-pr-review-and-fix.yml](.github/workflows/claude-pr-review-and-fix.yml) — Claude Code PR review-and-fix job. **Manual only** (`workflow_dispatch` with a validated `pr_number`); automatic `pull_request` triggers are deliberately commented out. Pushing fixes back requires write access to the PR head branch, so it only works for PRs from branches within this repo, not forks.
+- [scripts/external-code-review.py](scripts/external-code-review.py) — second-opinion review of the current git diff via an external model (OpenAI / Gemini / DeepSeek), printed and saved as Markdown. The diff leaves the machine — never run it against changes containing secrets or client PII.
+- [scripts/slack-daemon.js](scripts/slack-daemon.js) (`npm run slack-daemon`) — two-way bridge that turns a message in `SLACK_NOTIFY_CHANNEL` into a Claude Code run, with an append-only JSONL event log under `logs/`.
 
 ## Getting started
 
@@ -82,4 +99,5 @@ npm run db:seed-test  # tsx scripts/create-test-case.ts (single test case, for M
 npm run db:studio     # prisma studio
 npm run db:audit      # weekly case-audit CLI
 npm run mcp:serve     # run the smartcase MCP server standalone
+npm run slack-daemon  # Slack → Claude Code bridge daemon
 ```
