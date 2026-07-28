@@ -803,6 +803,27 @@ function tagsHost(caseId: string, tags: CaseTag[]): TaggedCase {
   return { id: caseId, tags } as unknown as TaggedCase;
 }
 
+// Compare-and-set on the Json `tags` column: the write only lands if the column
+// still holds exactly what we read. Both tag actions are read-modify-write over
+// a single Json column, so a plain `update` lets two concurrent writers clobber
+// each other (last write wins, the other tag silently vanishes) and lets a
+// duplicate slip past the engine's check, since both read the same pre-state.
+// `tags` is `Json @default("[]")` (non-nullable), so no DbNull branch is needed.
+// Returns false when the row moved underneath us — the caller re-reads and retries.
+async function commitTags(
+  caseId: string,
+  previous: unknown,
+  next: CaseTag[]
+): Promise<boolean> {
+  const { count } = await prisma.case.updateMany({
+    where: { id: caseId, tags: { equals: previous as object[] } },
+    data: { tags: next as object[] },
+  });
+  return count === 1;
+}
+
+const TAG_WRITE_ATTEMPTS = 3;
+
 export async function addCaseTag(
   caseId: string,
   input: AddCaseTagInput
@@ -815,10 +836,6 @@ export async function addCaseTag(
   if (!parsed.success) return { error: "פרטי התגית אינם תקינים" };
   const data = parsed.data;
 
-  const caseRow = await prisma.case.findUnique({ where: { id: caseId }, select: { tags: true } });
-  if (!caseRow) return { error: "התיק לא נמצא" };
-
-  const existingTags = parseCaseTags(caseRow.tags);
   const tag: CaseTag = {
     id: deriveTagId(data.category, data.label),
     label: data.label.trim(),
@@ -827,39 +844,50 @@ export async function addCaseTag(
     createdAt: new Date().toISOString(),
   };
 
-  // Validate through the pure engine WITHOUT its audit hook — a rejection
-  // never reaches the DB, and a success is only audited after persist
-  // actually commits (see the safeAuditWriter call below).
-  let nextTags: CaseTag[];
-  try {
-    nextTags = addTag(tagsHost(caseId, existingTags), tag).tags;
-  } catch {
+  // Re-read and re-validate on every attempt: a concurrent writer that changed
+  // the column invalidates both the duplicate check and the array we computed.
+  for (let attempt = 0; attempt < TAG_WRITE_ATTEMPTS; attempt++) {
+    const caseRow = await prisma.case.findUnique({ where: { id: caseId }, select: { tags: true } });
+    if (!caseRow) return { error: "התיק לא נמצא" };
+
+    const existingTags = parseCaseTags(caseRow.tags);
+
+    // Validate through the pure engine WITHOUT its audit hook — a rejection
+    // never reaches the DB, and a success is only audited after persist
+    // actually commits (see the safeAuditWriter call below).
+    let nextTags: CaseTag[];
+    try {
+      nextTags = addTag(tagsHost(caseId, existingTags), tag).tags;
+    } catch {
+      safeAuditWriter()({
+        timestamp: new Date().toISOString(),
+        action: "TAG_REJECTED",
+        caseId,
+        tagId: tag.id,
+        label: tag.label,
+        actor: session.user.name ?? userId,
+        reason: "duplicate",
+      });
+      return { error: "תגית כפולה — התגית כבר קיימת בתיק" };
+    }
+
+    if (!(await commitTags(caseId, caseRow.tags, nextTags))) continue;
+
     safeAuditWriter()({
       timestamp: new Date().toISOString(),
-      action: "TAG_REJECTED",
+      action: "TAG_ADDED",
       caseId,
       tagId: tag.id,
       label: tag.label,
       actor: session.user.name ?? userId,
-      reason: "duplicate",
     });
-    return { error: "תגית כפולה — התגית כבר קיימת בתיק" };
+
+    revalidatePath(`/cases/${caseId}`);
+    revalidatePath("/cases");
+    return {};
   }
 
-  await prisma.case.update({ where: { id: caseId }, data: { tags: nextTags as object[] } });
-
-  safeAuditWriter()({
-    timestamp: new Date().toISOString(),
-    action: "TAG_ADDED",
-    caseId,
-    tagId: tag.id,
-    label: tag.label,
-    actor: session.user.name ?? userId,
-  });
-
-  revalidatePath(`/cases/${caseId}`);
-  revalidatePath("/cases");
-  return {};
+  return { error: "התיק עודכן במקביל — נסה שוב" };
 }
 
 export async function removeCaseTag(caseId: string, tagId: string): Promise<{ error?: string }> {
@@ -868,29 +896,33 @@ export async function removeCaseTag(caseId: string, tagId: string): Promise<{ er
   if (!userId) return { error: "יש להתחבר מחדש" };
   if (!tagId) return { error: "תגית לא תקינה" };
 
-  const caseRow = await prisma.case.findUnique({ where: { id: caseId }, select: { tags: true } });
-  if (!caseRow) return { error: "התיק לא נמצא" };
+  for (let attempt = 0; attempt < TAG_WRITE_ATTEMPTS; attempt++) {
+    const caseRow = await prisma.case.findUnique({ where: { id: caseId }, select: { tags: true } });
+    if (!caseRow) return { error: "התיק לא נמצא" };
 
-  const existingTags = parseCaseTags(caseRow.tags);
-  const removedTag = existingTags.find((t) => t.id === tagId);
-  // Absent tag → no-op per spec I/O matrix: no write, no revalidate, no error.
-  if (!removedTag) return {};
-  const nextTags = removeTag(tagsHost(caseId, existingTags), tagId).tags;
+    const existingTags = parseCaseTags(caseRow.tags);
+    const removedTag = existingTags.find((t) => t.id === tagId);
+    // Absent tag → no-op per spec I/O matrix: no write, no revalidate, no error.
+    if (!removedTag) return {};
+    const nextTags = removeTag(tagsHost(caseId, existingTags), tagId).tags;
 
-  await prisma.case.update({ where: { id: caseId }, data: { tags: nextTags as object[] } });
+    if (!(await commitTags(caseId, caseRow.tags, nextTags))) continue;
 
-  safeAuditWriter()({
-    timestamp: new Date().toISOString(),
-    action: "TAG_REMOVED",
-    caseId,
-    tagId: removedTag.id,
-    label: removedTag.label,
-    actor: session.user.name ?? userId,
-  });
+    safeAuditWriter()({
+      timestamp: new Date().toISOString(),
+      action: "TAG_REMOVED",
+      caseId,
+      tagId: removedTag.id,
+      label: removedTag.label,
+      actor: session.user.name ?? userId,
+    });
 
-  revalidatePath(`/cases/${caseId}`);
-  revalidatePath("/cases");
-  return {};
+    revalidatePath(`/cases/${caseId}`);
+    revalidatePath("/cases");
+    return {};
+  }
+
+  return { error: "התיק עודכן במקביל — נסה שוב" };
 }
 
 // NOTE: the public conversion-portal submission logic (profile + children) lives

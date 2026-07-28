@@ -25,6 +25,11 @@ try:
 except ModuleNotFoundError:
     sys.exit("error: the 'requests' package is required — install with: pip install requests")
 
+try:  # optional: load the provider key from the repo env file, like scripts/slack-daemon.js
+    from dotenv import load_dotenv
+except ModuleNotFoundError:
+    load_dotenv = None
+
 MAX_DIFF_CHARS = 50_000
 TIMEOUT_SECONDS = 120
 
@@ -171,9 +176,13 @@ def main() -> None:
         print(f"dry-run: provider={args.provider} model={model} diff={len(diff):,} chars")
         return
 
+    # The key is read straight into this process — never echoed, logged, or
+    # written into the saved report.
+    if load_dotenv is not None:
+        load_dotenv(root / ".env")
     api_key = os.environ.get(provider_cfg["env_key"])
     if not api_key:
-        sys.exit(f"error: {provider_cfg['env_key']} is not set")
+        sys.exit(f"error: {provider_cfg['env_key']} is not set (export it, or add it to the repo env file)")
 
     review = request_review(args.provider, model, api_key, diff)
     print(review)
