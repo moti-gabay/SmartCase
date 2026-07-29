@@ -186,6 +186,7 @@ test("findForbiddenPaths blocks every code-execution and secret-bearing path", (
     ".claude/hooks/session-summary.sh",
     ".claude/settings.local.json",
     ".claude",
+    "src/.claude/settings.json",
     ".mcp.json",
     "package.json",
     "package-lock.json",

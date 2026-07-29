@@ -28,7 +28,9 @@ import { join } from "node:path";
 const FORBIDDEN_MATCHERS = [
   { label: "env file", test: (p) => p.split("/").some((seg) => seg.startsWith(".env")) },
   { label: "CI workflow", test: (p) => p === ".github" || p.startsWith(".github/") },
-  { label: "agent config", test: (p) => p === ".claude" || p.startsWith(".claude/") },
+  // Nested too: Claude Code honours directory-scoped .claude/, so a settings or
+  // hooks file anywhere in the tree is a live config-injection vector.
+  { label: "agent config", test: (p) => p === ".claude" || p.startsWith(".claude/") || p.includes("/.claude/") || p.endsWith("/.claude") },
   { label: "MCP config", test: (p) => p === ".mcp.json" },
   { label: "build/verification config", test: (p) => p === "package.json" || p === "package-lock.json" || p === "vercel.json" },
   { label: "RLS SQL", test: (p) => p.startsWith("prisma/sql/") },
