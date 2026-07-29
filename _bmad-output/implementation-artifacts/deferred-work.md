@@ -20,6 +20,10 @@
   summary: Slack ingress rewiring — make `scripts/slack-daemon.js` thread-aware (capture `thread_ts`, reply in-thread), add a trigger-user allowlist, and dispatch to the autofix orchestrator instead of a bare `claude -p`, including the reaction-based plan approval gate.
   evidence: Split from the "autonomous Slack issue-resolution architecture" intent. The orchestrator (plan → multi-model review → isolated execution → PR) is independently shippable and testable from the CLI; the Slack adapter is a thin layer over its `runPipeline(issue, hooks)` boundary and ships separately.
 
+- source_spec: none
+  summary: Route `.claude/hooks/session-summary.sh` output to a dedicated `#smartcase-ci` channel so `SLACK_NOTIFY_CHANNEL` stays a human support surface — address alongside the G1 ingress work.
+  evidence: Six triage scans of C0BJLPS50LE on 2026-07-29 found 2 human messages against 36 bot session summaries (~95% noise) over ~26h. The `790d26e` fingerprint dedupe stopped byte-identical repeats but not volume, since each commit produces a distinct summary. The noise makes the channel unscannable for a human and forces any automated reader to filter almost everything it fetches — which the deferred G1 ingress would have to do on every event.
+
 - source_spec: `spec-slack-autofix-orchestrator.md`
   summary: Phase 1 "read-only" planning disallows only Write and Edit — Bash, MultiEdit, NotebookEdit, and every MCP tool (postgres against DATABASE_URL, slack, playwright) remain available to a planning agent handling untrusted issue text.
   evidence: Review round 1. Docs corrected 2026-07-29 to state plainly that Phase 1 restricts file modification only, and that Bash/MCP are governed by session tool-permission config rather than by this pipeline — the misleading "read-only by construction" claim is gone. The hardening itself is still open: needs an explicit allow-list (`--allowedTools Read Grep Glob`) or a verified statement of what `--permission-mode plan` actually permits.
