@@ -22,11 +22,11 @@
 
 - source_spec: `spec-slack-autofix-orchestrator.md`
   summary: Phase 1 "read-only" planning disallows only Write and Edit — Bash, MultiEdit, NotebookEdit, and every MCP tool (postgres against DATABASE_URL, slack, playwright) remain available to a planning agent handling untrusted issue text.
-  evidence: Review round 1. The README calls Phase 1 "read-only by construction" and the security model rests on that claim; whether `--permission-mode plan` independently blocks Bash was not verified. Needs either an explicit allow-list (`--allowedTools Read Grep Glob`) or a verified statement of what plan mode actually permits.
+  evidence: Review round 1. Docs corrected 2026-07-29 to state plainly that Phase 1 restricts file modification only, and that Bash/MCP are governed by session tool-permission config rather than by this pipeline — the misleading "read-only by construction" claim is gone. The hardening itself is still open: needs an explicit allow-list (`--allowedTools Read Grep Glob`) or a verified statement of what `--permission-mode plan` actually permits.
 
 - source_spec: `spec-slack-autofix-orchestrator.md`
-  summary: PR base branch is whatever was checked out, and `main`/`master` are refused — so a PR can never target main, and the fix is built on a possibly stale local base with no fetch/rebase against origin.
-  evidence: Review round 1. Design tension inside the frozen spec: "refuse to run on main" plus "base = current branch" are individually reasonable and jointly mean the intended Slack-triggered flow has no path to a main-targeting PR. Needs a human decision on the intended base-branch policy.
+  summary: RESOLVED 2026-07-29 — PRs now target the repository's primary branch and fix branches are cut from it after a fetch, with the operator's original branch restored on exit.
+  evidence: Review round 1 flagged that "refuse to run on main" plus "base = current branch" jointly made a main-targeting PR impossible. Human decided PRs must target main; implemented via `resolveDefaultBranch()` (origin/HEAD → main → master).
 
 - source_spec: `spec-slack-autofix-orchestrator.md`
   summary: Issue text flows into the run id, the branch name, and the JSONL log — so client-identifying words from a Hebrew support report can be pushed to origin and persisted locally.

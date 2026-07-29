@@ -11,6 +11,7 @@ import {
   findForbiddenPaths,
   parsePorcelainZ,
   neutralizeVerdictMarkers,
+  parseDefaultBranchRef,
 } from "../scripts/autofix/guards.mjs";
 
 const WINDOWS_SHIM = "/mnt/c/Users/yeder/AppData/Roaming/npm/claude";
@@ -225,6 +226,22 @@ test("parsePorcelainZ handles Hebrew paths unquoted", () => {
   // With core.quotePath=false git emits raw UTF-8 instead of octal escapes.
   const raw = "?? src/אבג.ts\0";
   assert.deepEqual(parsePorcelainZ(raw), ["src/אבג.ts"]);
+});
+
+test("parseDefaultBranchRef extracts the branch from a remote symbolic ref", () => {
+  assert.equal(parseDefaultBranchRef("refs/remotes/origin/main"), "main");
+  assert.equal(parseDefaultBranchRef("refs/remotes/upstream/develop"), "develop");
+  assert.equal(parseDefaultBranchRef("refs/remotes/origin/release/v2"), "release/v2");
+  assert.equal(parseDefaultBranchRef("  refs/remotes/origin/main\n"), "main");
+});
+
+test("parseDefaultBranchRef returns null rather than guessing", () => {
+  // The caller falls back to main/master; a garbage branch name must not be
+  // synthesised and then used as a PR base.
+  assert.equal(parseDefaultBranchRef("refs/heads/main"), null);
+  assert.equal(parseDefaultBranchRef(""), null);
+  assert.equal(parseDefaultBranchRef(null), null);
+  assert.equal(parseDefaultBranchRef("fatal: ref not found"), null);
 });
 
 test("parsePorcelainZ tolerates empty and malformed input", () => {

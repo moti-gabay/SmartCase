@@ -14,11 +14,16 @@ echo "$ISSUE_TEXT" | npm run autofix --          # issue on stdin
 | # | Phase | What runs | Gate |
 |---|-------|-----------|------|
 | 0 | Preflight | Resolve the Claude CLI, verify `--version` | Aborts if no usable binary |
-| 1 | Plan | `claude --print --permission-mode plan --disallowedTools Write Edit` → `plan.md` | Read-only by construction |
+| 1 | Plan | `claude --print --permission-mode plan --disallowedTools Write Edit` → `plan.md` | No file modification |
 | 2 | Review | `external-code-review.py --mode plan` against an independent model | `VERDICT: PASS` required |
 | — | Approval | Interactive prompt (or `hooks.requestApproval`) | **Human must approve** |
-| 3 | Execute | `claude --print --dangerously-skip-permissions` on `fix/slack-issue-<runId>`, then `npm test && npm run build` | Both must pass |
-| 4 | PR | `git push` + `gh pr create --draft` | Skipped by `--no-pr` |
+| 3 | Execute | `claude --print --dangerously-skip-permissions` on `fix/slack-issue-<runId>`, cut from the default branch, then `npm test && npm run build` | Both must pass |
+| 4 | PR | `git push` + `gh pr create --draft --base <default branch>` | Skipped by `--no-pr` |
+
+The fix branch is cut from the repository's primary branch (`origin/HEAD`, falling back to
+`main`/`master`) rather than from whatever is checked out, and the PR targets that same branch.
+Branching from an arbitrary feature branch while targeting `main` would pull that branch's unmerged
+commits into the PR diff. Your original branch is restored when the run ends, pass or fail.
 
 Artifacts land in `_bmad-output/autofix/<runId>/` (`plan.md`, `review.md`).
 Every phase appends to `logs/autofix-events.jsonl` (gitignored).
@@ -60,6 +65,12 @@ that make that acceptable, and none of them should be relaxed casually:
 
 - **Human gate.** Execution never starts without an explicit approval. `--yes` exists
   for non-interactive runs and is the single most dangerous flag here.
+- **Phase 1 restricts file modification, not execution.** `--permission-mode plan` plus
+  `--disallowedTools Write Edit` means the planning pass cannot modify files. It does
+  **not** disable `Bash` or the MCP servers configured in `.mcp.json` (including
+  `postgres` against `DATABASE_URL`) — those are governed by the session's tool-permission
+  configuration, not by this pipeline. Do not read "planning is read-only" as "planning is
+  sandboxed". Tightening this to an explicit allow-list is tracked in `deferred-work.md`.
 - **Fail-closed review, in two layers.** The verdict is read from the reviewer's final
   non-empty line only, and `VERDICT:` markers are defanged in the copy of the plan sent
   to the reviewer. Both are needed: the plan derives from untrusted issue text, reviewers

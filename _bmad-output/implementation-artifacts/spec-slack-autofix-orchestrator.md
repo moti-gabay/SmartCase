@@ -2,7 +2,7 @@
 title: 'Autonomous Issue-Resolution Orchestrator (plan → review → execute → PR)'
 type: 'feature'
 created: '2026-07-29'
-status: 'in-review'
+status: 'done'
 review_loop_iteration: 0
 baseline_commit: 'c3c5288'
 context:
@@ -85,6 +85,8 @@ context:
 
 - **2026-07-29 — review round 1 (Blind Hunter + Edge Case Hunter, independent).** Two context-free reviewers converged on ~11 identical defects. Seven were reproduced empirically before any fix. Two were security-critical: (a) `parseVerdict`'s documented "last VERDICT: match wins" rule was forgeable — a reviewer returning `VERDICT: FAIL` parsed as `PASS` when the plan's tail was echoed, defeating Phase 2 entirely; (b) the frozen forbidden-path list of four entries missed every real escalation vector — `.claude/hooks/*` (runs as shell next session), `.mcp.json`, `package.json` (rewriting `test` self-approves the verification gate), and case variants, all verified ALLOWED. Also confirmed: `git status --porcelain` parsing missed files inside new directories, both sides of renames, and octal-quoted Hebrew paths; `\z` is a literal `z` in JS regex; documented piped-stdin usage hung forever at the approval gate. Amended the Design Notes verdict rule to anchor on the reviewer's final non-empty line plus defang `VERDICT:` markers in the reviewer's copy of the plan (two layers, since anchoring alone does not stop a plan that ends the response). All fixes applied in place as `patch` — no revert — because each is localised to a pure function with test coverage. KEEP: `guards.mjs` stays pure and dependency-injected; `plan.md` stays pristine for the human while only the reviewer's copy is neutralised; over-blocking paths is preferred to under-blocking since a false positive only aborts a run.
 
+- **2026-07-29 — human decisions on the two review escalations.** (a) Base-branch tension resolved: PRs must target the repository's primary branch, so fix branches are now cut from `origin/HEAD` (falling back to `main`/`master`) after a fetch, and the operator's starting branch is restored on exit. The frozen "never run on main" rule is unchanged — the start branch and the PR base are now separate concepts. (b) Phase 1 tool scope: docs corrected rather than hardened. The README no longer claims "read-only by construction"; it states that Phase 1 blocks file modification only and that Bash/MCP are governed by session tool-permission config. Further sandboxing stays in `deferred-work.md` by explicit decision. KEEP: `startBranch` and `baseBranch` must remain distinct — conflating them is what produced the original tension.
+
 ## Design Notes
 
 Phase boundary contract — the shape a future Slack adapter binds to:
@@ -107,3 +109,66 @@ await runPipeline(issueText, {
 - `npm run lint` -- expected: no new errors in `scripts/autofix/**`.
 - `npm run autofix -- --dry-run "checkout button is misaligned on mobile"` -- expected: prints resolved binary/runId/branch, exits 0, no branch created (`git status` clean, `git branch` unchanged).
 - `python3 scripts/external-code-review.py --mode plan --plan-file <fixture> --dry-run` -- expected: reports plan-mode selection without calling the API.
+
+## Suggested Review Order
+
+**Trust boundary — start here**
+
+- Entry point: the four phases and every gate between them, in execution order.
+  [`pipeline.mjs:266`](../../scripts/autofix/pipeline.mjs#L266)
+
+- Two-layer defence against verdict forgery; a reviewer FAIL used to parse as PASS.
+  [`guards.mjs:137`](../../scripts/autofix/guards.mjs#L137)
+
+- Why the marker is defanged before the plan reaches the reviewer at all.
+  [`guards.mjs:167`](../../scripts/autofix/guards.mjs#L167)
+
+- The containment list: paths that execute code, hold secrets, or gate verification.
+  [`guards.mjs:28`](../../scripts/autofix/guards.mjs#L28)
+
+- Porcelain parsing — new-directory files, rename pairs, and Hebrew paths all bypassed the scan.
+  [`guards.mjs:194`](../../scripts/autofix/guards.mjs#L194)
+
+- The scan itself; note it stops the push, not the write.
+  [`pipeline.mjs:388`](../../scripts/autofix/pipeline.mjs#L388)
+
+**Repo state and recovery**
+
+- Preconditions checked before any expensive phase, not after the human gate.
+  [`pipeline.mjs:169`](../../scripts/autofix/pipeline.mjs#L169)
+
+- PR target policy: cut from the primary branch so the diff carries only the fix.
+  [`pipeline.mjs:198`](../../scripts/autofix/pipeline.mjs#L198)
+
+- Branch creation from the fetched default branch.
+  [`pipeline.mjs:368`](../../scripts/autofix/pipeline.mjs#L368)
+
+- Cleanup guarantee — a failed run must not poison the next one.
+  [`pipeline.mjs:463`](../../scripts/autofix/pipeline.mjs#L463)
+
+**Process handling**
+
+- UTF-8 at the stream, output cap, EPIPE, and signal-aware exit codes.
+  [`pipeline.mjs:89`](../../scripts/autofix/pipeline.mjs#L89)
+
+- Binary resolution order; PATH is last because of the WSL shim.
+  [`guards.mjs:58`](../../scripts/autofix/guards.mjs#L58)
+
+**Human interface**
+
+- The approval gate reads /dev/tty, so piped input no longer hangs forever.
+  [`cli.mjs:85`](../../scripts/autofix/cli.mjs#L85)
+
+- Argument validation, `--` terminator, provider allow-list.
+  [`cli.mjs:27`](../../scripts/autofix/cli.mjs#L27)
+
+**Supporting changes**
+
+- The daemon now shares one tested resolver and fails loudly in-channel.
+  [`slack-daemon.js:52`](../../scripts/slack-daemon.js#L52)
+
+- Plan-audit rubric and the mandatory closing verdict line.
+  [`external-code-review.py:54`](../../scripts/external-code-review.py#L54)
+
+- 109 tests; each security fix has a test naming the exploit it closes.
+  [`autofix-guards.test.ts:1`](../../tests/autofix-guards.test.ts#L1)

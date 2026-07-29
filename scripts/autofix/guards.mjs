@@ -74,6 +74,18 @@ export function resolveClaudeBin(env = process.env, deps = {}) {
   return { path: null, source: null, tried };
 }
 
+/**
+ * Extract a branch name from a symbolic ref.
+ *
+ * `git symbolic-ref refs/remotes/origin/HEAD` yields `refs/remotes/origin/main`;
+ * we want just `main`. Returns null for anything unrecognisable so the caller
+ * can fall back rather than build a branch name out of garbage.
+ */
+export function parseDefaultBranchRef(ref) {
+  const match = String(ref ?? "").trim().match(/^refs\/remotes\/[^/]+\/(.+)$/);
+  return match ? match[1] : null;
+}
+
 /** FNV-1a 32-bit — small, dependency-free, and stable across runs. */
 function fnv1a(text) {
   let hash = 0x811c9dc5;

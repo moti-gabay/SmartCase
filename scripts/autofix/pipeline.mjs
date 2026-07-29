@@ -21,6 +21,7 @@ import {
   findForbiddenPaths,
   parsePorcelainZ,
   neutralizeVerdictMarkers,
+  parseDefaultBranchRef,
 } from "./guards.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -186,6 +187,30 @@ async function assertSafeRepoState(branchToCreate) {
   return branch;
 }
 
+/**
+ * The repository's primary branch — the PR target.
+ *
+ * Fix branches are cut from this, not from whatever happened to be checked out,
+ * so the PR diff contains only the fix. Branching from an arbitrary feature
+ * branch while targeting main would drag that branch's unmerged commits into
+ * the PR.
+ */
+async function resolveDefaultBranch() {
+  const symbolic = await git(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]).catch(() => "");
+  const fromRemote = parseDefaultBranchRef(symbolic);
+  if (fromRemote) return fromRemote;
+
+  for (const candidate of ["main", "master"]) {
+    const exists = await git(["rev-parse", "--verify", "--quiet", candidate]).catch(() => "");
+    if (exists) return candidate;
+  }
+  throw new AutofixError(
+    EXIT.UNSAFE_REPO_STATE,
+    "cannot determine the repository's default branch",
+    "expected origin/HEAD, or a local main/master"
+  );
+}
+
 /** Every changed path, including inside new directories and both sides of a rename. */
 async function changedPaths() {
   const raw = await git(["-c", "core.quotePath=false", "status", "--porcelain", "-z", "--untracked-files=all"]);
@@ -264,7 +289,10 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
   const claude = await preflightClaude(env);
   // Check repo state up front. Discovering a dirty tree only after a 10-minute
   // plan pass, a paid review call, and a human approval wastes all three.
-  const baseBranch = options.dryRun ? null : await assertSafeRepoState(branch);
+  // startBranch is only remembered so cleanup can put the operator back where
+  // they were; the PR always targets the repository's primary branch.
+  const startBranch = options.dryRun ? null : await assertSafeRepoState(branch);
+  const baseBranch = options.dryRun ? null : await resolveDefaultBranch();
 
   if (options.dryRun) {
     const info = { runId, branch, claudeBin: claude.path, claudeSource: claude.source, provider, artifactDir };
@@ -337,10 +365,16 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
     // ---- Phase 3: isolated execution -------------------------------------
     // Re-check: the tree may have changed while the human was deciding.
     await assertSafeRepoState(branch);
-    onPhase(3, "execute", `implementing on ${branch}`);
-    await git(["checkout", "-b", branch]);
+    onPhase(3, "execute", `implementing on ${branch} (from ${baseBranch})`);
+    // Best-effort refresh so the fix is built on current main rather than a
+    // stale local copy; a missing remote is not fatal.
+    await git(["fetch", "origin", baseBranch]).catch(() => null);
+    const startPoint = await git(["rev-parse", "--verify", "--quiet", `origin/${baseBranch}`])
+      .catch(() => "")
+      .then((sha) => (sha ? `origin/${baseBranch}` : baseBranch));
+    await git(["checkout", "-b", branch, startPoint]);
     branchCreated = true;
-    log("ok", "branch", { base: baseBranch });
+    log("ok", "branch", { base: baseBranch, start_point: startPoint, returned_to: startBranch });
 
     await runClaude(claude.path, ["--print", "--dangerously-skip-permissions"], EXECUTE_PROMPT(plan), TIMEOUTS.execute);
 
@@ -418,7 +452,7 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
       log("ok", "pr", { pr_url: prUrl });
     }
 
-    const summary = { runId, branch, prUrl, verdict, testResults, planPath, reviewPath, filesChanged: changed.length };
+    const summary = { runId, branch, baseBranch, prUrl, verdict, testResults, planPath, reviewPath, filesChanged: changed.length };
     await report(summary);
     log("success", "done", { exit_code: EXIT.OK, pr_url: prUrl });
     return summary;
@@ -433,13 +467,21 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
     // risks those edits being swept into an unrelated commit.
     if (branchCreated && !committed) {
       try {
-        await git(["checkout", "--force", baseBranch]);
+        await git(["checkout", "--force", startBranch]);
         await git(["clean", "-fd"]);
         await git(["branch", "-D", branch]);
-        log("ok", "cleanup", { restored_to: baseBranch, discarded_branch: branch });
+        log("ok", "cleanup", { restored_to: startBranch, discarded_branch: branch });
       } catch (cleanupErr) {
         log("failed", "cleanup", { error: cleanupErr.message });
         console.error(`[autofix] cleanup failed — repo may be left on ${branch}: ${cleanupErr.message}`);
+      }
+    } else if (branchCreated && committed) {
+      // Success path: the commit lives on the fix branch and is pushed, so put
+      // the operator back on the branch they started from.
+      try {
+        await git(["checkout", startBranch]);
+      } catch {
+        console.error(`[autofix] could not return to ${startBranch}; still on ${branch}`);
       }
     }
   }

@@ -11,6 +11,14 @@ Stop hook. No new human queries; latest human message is still `1785239425`. Act
 Signal-to-noise has worsened, not improved: 2 human messages against 35 bot posts. Item 5 (routing
 session summaries to a separate channel) is the one that would actually make this channel scannable.
 
+**Fourth scan:** one new message, `1785326774` — a bot session summary triggered by this session's
+own commits. No new human queries; latest human message is still `1785239425`. Running total:
+2 human messages against 36 bot posts over ~26h. Four consecutive scans have found nothing
+actionable, which is itself the finding: at this traffic level repeated on-demand scanning returns
+no value, and the bot noise is the only thing that changes between passes. Item 5 remains the single
+highest-leverage fix; item 3 (bot token scopes) is confirmed pending a manual Slack App Manifest
+update. Item 4 (daemon PATH break) is CLOSED — fixed in commit da9479e.
+
 ## Channel composition
 
 | Type | Count |
