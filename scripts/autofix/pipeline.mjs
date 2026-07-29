@@ -13,7 +13,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { resolveClaudeBin, runIdFor, branchNameFor, parseVerdict, findForbiddenPaths } from "./guards.mjs";
+import {
+  resolveClaudeBin,
+  runIdFor,
+  branchNameFor,
+  parseVerdict,
+  findForbiddenPaths,
+  parsePorcelainZ,
+  neutralizeVerdictMarkers,
+} from "./guards.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -26,7 +34,11 @@ export const EXIT = {
   UNSAFE_REPO_STATE: 5,
   FORBIDDEN_PATHS: 6,
   NO_CLAUDE_BIN: 7,
+  CLAUDE_FAILED: 8,
 };
+
+/** Cap on a single child's stdout — a runaway transcript must not OOM the host. */
+const MAX_CHILD_OUTPUT = 32 * 1024 * 1024;
 
 const TIMEOUTS = {
   version: 30_000,
@@ -79,24 +91,50 @@ function runClaude(bin, args, prompt, timeoutMs) {
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let overflowed = false;
+
+    // Decode as UTF-8 at the stream, not per chunk. Hebrew is multi-byte and a
+    // sequence split across a chunk boundary would otherwise decode to U+FFFD —
+    // corrupting the very plan that gets reviewed and then executed.
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
 
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
     }, timeoutMs);
 
-    child.stdout.on("data", (chunk) => (stdout += chunk));
-    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.stdout.on("data", (chunk) => {
+      if (stdout.length > MAX_CHILD_OUTPUT) {
+        overflowed = true;
+        child.kill("SIGKILL");
+        return;
+      }
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      if (stderr.length < 1024 * 1024) stderr += chunk;
+    });
+
+    // A child that dies before draining stdin raises EPIPE on the write below;
+    // unhandled, that 'error' event would take down the orchestrator itself.
+    child.stdin.on("error", () => {});
+
     child.on("error", (err) => {
       clearTimeout(timer);
-      reject(new AutofixError(EXIT.NO_CLAUDE_BIN, `failed to launch ${bin}: ${err.message}`));
+      const code = err.code === "ENOENT" ? EXIT.NO_CLAUDE_BIN : EXIT.CLAUDE_FAILED;
+      reject(new AutofixError(code, `failed to launch ${bin}: ${err.message}`));
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       clearTimeout(timer);
-      if (timedOut) {
-        reject(new AutofixError(EXIT.TESTS_FAILED, `claude timed out after ${timeoutMs / 1000}s`, tail(stderr)));
+      if (overflowed) {
+        reject(new AutofixError(EXIT.CLAUDE_FAILED, `claude output exceeded ${MAX_CHILD_OUTPUT} bytes`, tail(stderr)));
+      } else if (timedOut) {
+        reject(new AutofixError(EXIT.CLAUDE_FAILED, `claude timed out after ${timeoutMs / 1000}s`, tail(stderr)));
+      } else if (signal) {
+        reject(new AutofixError(EXIT.CLAUDE_FAILED, `claude killed by ${signal}`, tail(stderr)));
       } else if (code !== 0) {
-        reject(new AutofixError(EXIT.TESTS_FAILED, `claude exited ${code}`, tail(stderr)));
+        reject(new AutofixError(EXIT.CLAUDE_FAILED, `claude exited ${code}`, tail(stderr)));
       } else {
         resolve(stdout);
       }
@@ -127,8 +165,11 @@ async function preflightClaude(env) {
   return resolved;
 }
 
-async function assertSafeRepoState() {
+async function assertSafeRepoState(branchToCreate) {
   const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
+  if (branch === "HEAD") {
+    throw new AutofixError(EXIT.UNSAFE_REPO_STATE, "refusing to run on a detached HEAD", "check out a named branch first");
+  }
   if (branch === "main" || branch === "master") {
     throw new AutofixError(EXIT.UNSAFE_REPO_STATE, `refusing to run on ${branch}`, "check out a working branch first");
   }
@@ -136,7 +177,19 @@ async function assertSafeRepoState() {
   if (dirty) {
     throw new AutofixError(EXIT.UNSAFE_REPO_STATE, "working tree is dirty", tail(dirty, 15));
   }
+  if (branchToCreate) {
+    const exists = await git(["rev-parse", "--verify", "--quiet", branchToCreate]).catch(() => "");
+    if (exists) {
+      throw new AutofixError(EXIT.UNSAFE_REPO_STATE, `branch ${branchToCreate} already exists`, "delete it or rerun to get a new run id");
+    }
+  }
   return branch;
+}
+
+/** Every changed path, including inside new directories and both sides of a rename. */
+async function changedPaths() {
+  const raw = await git(["-c", "core.quotePath=false", "status", "--porcelain", "-z", "--untracked-files=all"]);
+  return parsePorcelainZ(raw);
 }
 
 const PLAN_PROMPT = (issue) => `A support issue was reported for this repository. Investigate it and produce an implementation plan.
@@ -202,12 +255,16 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
   const branch = branchNameFor(runId);
   const artifactDir = join(REPO_ROOT, "_bmad-output", "autofix", runId);
   const planPath = join(artifactDir, "plan.md");
+  const reviewInputPath = join(artifactDir, "plan.for-review.md");
   const reviewPath = join(artifactDir, "review.md");
 
   const log = (status, phase, extra = {}) => logEvent({ runId, branch, phase, status, ...extra });
 
   onPhase(0, "preflight", "resolving claude binary");
   const claude = await preflightClaude(env);
+  // Check repo state up front. Discovering a dirty tree only after a 10-minute
+  // plan pass, a paid review call, and a human approval wastes all three.
+  const baseBranch = options.dryRun ? null : await assertSafeRepoState(branch);
 
   if (options.dryRun) {
     const info = { runId, branch, claudeBin: claude.path, claudeSource: claude.source, provider, artifactDir };
@@ -219,6 +276,9 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
   mkdirSync(artifactDir, { recursive: true });
   log("started", "preflight", { claude_source: claude.source });
 
+  let branchCreated = false;
+  let committed = false;
+
   try {
     // ---- Phase 1: read-only planning -------------------------------------
     onPhase(1, "plan", "analyzing the issue (read-only)");
@@ -228,16 +288,29 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
       PLAN_PROMPT(issue),
       TIMEOUTS.plan
     );
+    if (!plan.trim()) {
+      throw new AutofixError(EXIT.CLAUDE_FAILED, "planning produced no output", "claude returned an empty plan");
+    }
     writeFileSync(planPath, plan, "utf8");
+    // The reviewer gets a copy with VERDICT: markers defanged, so it cannot
+    // echo one back as its own conclusion. plan.md stays pristine for the human.
+    writeFileSync(reviewInputPath, neutralizeVerdictMarkers(plan), "utf8");
     log("ok", "plan", { artifact: planPath });
 
     // ---- Phase 2: independent multi-model review -------------------------
     onPhase(2, "review", `auditing the plan via ${provider}`);
-    const { stdout: reviewOut } = await execFileAsync(
-      "python3",
-      [join("scripts", "external-code-review.py"), "--mode", "plan", "--plan-file", planPath, "--provider", provider],
-      { cwd: REPO_ROOT, timeout: TIMEOUTS.review, maxBuffer: 10 * 1024 * 1024 }
-    );
+    let reviewOut;
+    try {
+      ({ stdout: reviewOut } = await execFileAsync(
+        "python3",
+        [join("scripts", "external-code-review.py"), "--mode", "plan", "--plan-file", reviewInputPath, "--provider", provider],
+        { cwd: REPO_ROOT, timeout: TIMEOUTS.review, maxBuffer: 10 * 1024 * 1024 }
+      ));
+    } catch (err) {
+      // A missing API key or a provider error must surface as "review failed",
+      // not as a generic exit 1 that an operator monitoring the gate will miss.
+      throw new AutofixError(EXIT.REVIEW_FAILED, "plan review could not run", tail(err.stderr || err.message, 20));
+    }
     writeFileSync(reviewPath, reviewOut, "utf8");
     const verdict = parseVerdict(reviewOut);
     log("ok", "review", { verdict });
@@ -262,17 +335,16 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
     }
 
     // ---- Phase 3: isolated execution -------------------------------------
-    const baseBranch = await assertSafeRepoState();
+    // Re-check: the tree may have changed while the human was deciding.
+    await assertSafeRepoState(branch);
     onPhase(3, "execute", `implementing on ${branch}`);
     await git(["checkout", "-b", branch]);
+    branchCreated = true;
     log("ok", "branch", { base: baseBranch });
 
     await runClaude(claude.path, ["--print", "--dangerously-skip-permissions"], EXECUTE_PROMPT(plan), TIMEOUTS.execute);
 
-    const changed = (await git(["status", "--porcelain"]))
-      .split("\n")
-      .map((line) => line.slice(3).trim())
-      .filter(Boolean);
+    const changed = await changedPaths();
 
     if (changed.length === 0) {
       log("failed", "execute", { exit_code: EXIT.TESTS_FAILED });
@@ -282,9 +354,12 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
     const forbidden = findForbiddenPaths(changed);
     if (forbidden.length > 0) {
       log("failed", "execute", { exit_code: EXIT.FORBIDDEN_PATHS, forbidden: forbidden.map((f) => f.path) });
+      // The edits are already on disk — the agent ran with permissions bypassed,
+      // so this gate can only stop them going further. The finally block below
+      // discards them rather than leaving them staged for a later `git add -A`.
       throw new AutofixError(
         EXIT.FORBIDDEN_PATHS,
-        "execution touched forbidden paths — refusing to push",
+        "execution touched forbidden paths — discarding the change and refusing to push",
         forbidden.map((f) => `  ${f.path} (${f.reason})`).join("\n")
       );
     }
@@ -309,8 +384,13 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
     log("ok", "verify", { results: testResults });
 
     // ---- Phase 4: commit, push, PR ---------------------------------------
+    // Collapse whitespace and slice by code point: a newline would truncate the
+    // commit subject, and a byte slice can cut a surrogate pair or a Hebrew
+    // combining mark in half, which `gh` rejects.
+    const subject = [...issue.replace(/\s+/g, " ").trim()].slice(0, 60).join("");
     await git(["add", "-A"]);
-    await git(["commit", "-m", `fix: ${issue.slice(0, 60)}\n\nAutofix run ${runId}.\nPlan reviewed by ${provider} (VERDICT: PASS) and human-approved.`]);
+    await git(["commit", "-m", `fix: ${subject}\n\nAutofix run ${runId}.\nPlan reviewed by ${provider} (VERDICT: PASS) and human-approved.`]);
+    committed = true;
 
     let prUrl = null;
     if (createPr) {
@@ -331,7 +411,7 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
       ].join("\n");
       const { stdout } = await execFileAsync(
         "gh",
-        ["pr", "create", "--draft", "--base", baseBranch, "--head", branch, "--title", `fix: ${issue.slice(0, 60)}`, "--body", body],
+        ["pr", "create", "--draft", "--base", baseBranch, "--head", branch, "--title", `fix: ${subject}`, "--body", body],
         { cwd: REPO_ROOT, timeout: TIMEOUTS.git }
       );
       prUrl = stdout.trim();
@@ -346,12 +426,34 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
     const code = err instanceof AutofixError ? err.code : 1;
     log("failed", err instanceof AutofixError ? "pipeline" : "unexpected", { exit_code: code, error: err.message });
     throw err;
+  } finally {
+    // Restore the repo to how we found it. Without this, any failure after
+    // `checkout -b` strands the working tree on the fix branch with the agent's
+    // uncommitted edits — which then blocks every later run as "dirty", and
+    // risks those edits being swept into an unrelated commit.
+    if (branchCreated && !committed) {
+      try {
+        await git(["checkout", "--force", baseBranch]);
+        await git(["clean", "-fd"]);
+        await git(["branch", "-D", branch]);
+        log("ok", "cleanup", { restored_to: baseBranch, discarded_branch: branch });
+      } catch (cleanupErr) {
+        log("failed", "cleanup", { error: cleanupErr.message });
+        console.error(`[autofix] cleanup failed — repo may be left on ${branch}: ${cleanupErr.message}`);
+      }
+    }
   }
 }
 
-/** Pull one `## Heading` section out of the plan for the PR body. */
+/**
+ * Pull one `## Heading` section out of the plan for the PR body.
+ *
+ * JS regex has no `\z` anchor — `\z` matches a literal "z" — so the terminator
+ * is `$(?![\s\S])`, which is a true end-of-input assertion under the `m` flag.
+ * With `\z` the final section of a plan silently extracted as nothing.
+ */
 function extractSection(markdown, heading) {
-  const pattern = new RegExp(`^##\\s+${heading}\\s*$([\\s\\S]*?)(?=^##\\s|\\z)`, "im");
+  const pattern = new RegExp(`^##\\s+${heading}\\s*$([\\s\\S]*?)(?=^##\\s|$(?![\\s\\S]))`, "im");
   const match = String(markdown).match(pattern);
   const body = match ? match[1].trim() : "";
   return body ? body.slice(0, 2000) : "_(not provided by the plan)_";

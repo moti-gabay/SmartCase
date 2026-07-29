@@ -206,6 +206,7 @@ def main() -> None:
             sys.exit(f"error: cannot read plan file: {exc}")
         if not plan:
             sys.exit(f"error: plan file is empty: {plan_path}")
+        plan = truncate_diff(plan)  # same cap as diffs — oversized bodies 400 or time out
         system_prompt = PLAN_SYSTEM_PROMPT
         user_prompt = f"Audit this implementation plan:\n\n{plan}"
         size_label = f"plan={len(plan):,} chars"

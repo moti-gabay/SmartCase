@@ -6,6 +6,11 @@
 **Re-scan (same day, later):** no change. Newest message still `1785324546`; no new human queries.
 Thread `1785239425` moved 1 → 3 replies, all authored by this triage pass. Action items below unchanged.
 
+**Third scan:** one new message, `1785325595` — a bot session summary emitted by this session's own
+Stop hook. No new human queries; latest human message is still `1785239425`. Action items unchanged.
+Signal-to-noise has worsened, not improved: 2 human messages against 35 bot posts. Item 5 (routing
+session summaries to a separate channel) is the one that would actually make this channel scannable.
+
 ## Channel composition
 
 | Type | Count |

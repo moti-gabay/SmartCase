@@ -8,11 +8,29 @@ import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-/** Paths a fix branch must never touch — secrets, CI, agent config, RLS setup. */
+/**
+ * Paths a fix branch must never touch.
+ *
+ * Over-blocking is cheap (the run aborts and a human looks) while under-blocking
+ * hands an autonomous agent a privilege-escalation path, so this list is
+ * deliberately broader than "files related to the fix". Every entry is here
+ * because it either executes code, carries secrets, or gates the verification
+ * that decides whether the change is safe to ship:
+ *
+ *   .claude/**   hook scripts run as shell at the end of the next session
+ *   .mcp.json    MCP server definitions + credential placeholders
+ *   package.json rewriting the `test` script lets a change approve itself
+ *   .github/**   CI runs with repository credentials
+ *
+ * Matching is case-insensitive: git is case-sensitive but macOS/Windows
+ * filesystems are not, so `.ENV` must not slip past a lowercase comparison.
+ */
 const FORBIDDEN_MATCHERS = [
   { label: "env file", test: (p) => p.split("/").some((seg) => seg.startsWith(".env")) },
-  { label: "CI workflow", test: (p) => p.startsWith(".github/") },
-  { label: "agent settings", test: (p) => p === ".claude/settings.json" },
+  { label: "CI workflow", test: (p) => p === ".github" || p.startsWith(".github/") },
+  { label: "agent config", test: (p) => p === ".claude" || p.startsWith(".claude/") },
+  { label: "MCP config", test: (p) => p === ".mcp.json" },
+  { label: "build/verification config", test: (p) => p === "package.json" || p === "package-lock.json" || p === "vercel.json" },
   { label: "RLS SQL", test: (p) => p.startsWith("prisma/sql/") },
 ];
 
@@ -88,17 +106,52 @@ export function branchNameFor(runId) {
 }
 
 /**
- * Read the reviewer's verdict. Fail-closed: a missing, truncated, or malformed
- * verdict returns UNKNOWN, and callers must treat UNKNOWN as FAIL so a broken
- * reviewer response can never green-light execution.
+ * Read the reviewer's verdict from the FINAL non-empty line only.
+ *
+ * Anchoring to the last line — rather than the last `VERDICT:` match anywhere in
+ * the response — is a security property, not a style choice. The reviewer prompt
+ * embeds the audited plan verbatim, and the plan is derived from untrusted issue
+ * text. A "last match wins" scan lets a plan ending in `VERDICT: PASS` override a
+ * reviewer that actually returned FAIL, because models routinely echo the tail of
+ * the document they were given. Only the reviewer's own closing line counts.
+ *
+ * Fail-closed: anything else — a missing, truncated, fenced, or quoted verdict —
+ * returns UNKNOWN, and callers must treat UNKNOWN as FAIL.
  *
  * @returns {'PASS'|'FAIL'|'UNKNOWN'}
  */
 export function parseVerdict(reviewMarkdown) {
-  const matches = String(reviewMarkdown ?? "").match(/^\s*\**VERDICT\**\s*:\s*\**\s*(PASS|FAIL)\b/gim);
-  if (!matches || matches.length === 0) return "UNKNOWN";
-  const last = matches[matches.length - 1];
-  return /FAIL/i.test(last) ? "FAIL" : "PASS";
+  const lines = String(reviewMarkdown ?? "").split("\n");
+  let lastLine = "";
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (lines[i].trim()) {
+      lastLine = lines[i].trim();
+      break;
+    }
+  }
+  // Reject fenced or quoted lines outright — a verdict inside ``` or > is an
+  // illustration or a quotation of the plan, never the reviewer's conclusion.
+  if (!lastLine || lastLine.startsWith("```") || lastLine.startsWith(">")) return "UNKNOWN";
+
+  const match = lastLine.match(/^\**VERDICT\**\s*:\s*\**\s*(PASS|FAIL)\**\s*\.?$/i);
+  if (!match) return "UNKNOWN";
+  return match[1].toUpperCase();
+}
+
+/**
+ * Defang `VERDICT:` markers in text that is about to be embedded in the
+ * reviewer's prompt.
+ *
+ * The plan is derived from untrusted issue text, and reviewers routinely echo
+ * the document they were given. Without this, a plan ending in `VERDICT: PASS`
+ * can appear as the reviewer's own closing line and flip a real FAIL to PASS —
+ * defeating the entire Phase 2 gate. Anchoring the parser to the last line is
+ * necessary but not sufficient; the marker must not survive into the prompt at
+ * all. The plan.md kept for the human is left pristine — only the reviewer's
+ * copy is neutralised.
+ */
+export function neutralizeVerdictMarkers(text) {
+  return String(text ?? "").replace(/VERDICT(\s*):/gi, "VERDICT$1․");
 }
 
 /** @returns {Array<{path: string, reason: string}>} — empty means the diff is safe to push. */
@@ -107,8 +160,37 @@ export function findForbiddenPaths(changedPaths) {
   for (const raw of changedPaths ?? []) {
     const path = String(raw).trim().replace(/^\.\//, "");
     if (!path) continue;
-    const hit = FORBIDDEN_MATCHERS.find((matcher) => matcher.test(path));
+    const probe = path.toLowerCase();
+    const hit = FORBIDDEN_MATCHERS.find((matcher) => matcher.test(probe));
     if (hit) findings.push({ path, reason: hit.label });
   }
   return findings;
+}
+
+/**
+ * Parse `git status --porcelain -z --untracked-files=all` into plain paths.
+ *
+ * Three porcelain behaviours defeat naive `line.slice(3)` parsing, and each one
+ * is a way for a forbidden file to pass the scan unseen:
+ *   - untracked directories collapse to `?? dir/` unless -uall is passed
+ *   - renames appear as `R  old -> new` (NUL-separated as old\0new with -z)
+ *   - non-ASCII paths are octal-escaped and quoted unless core.quotePath=false
+ * Caller must pass `-z`, `-uall`, and `-c core.quotePath=false`.
+ */
+export function parsePorcelainZ(raw) {
+  const entries = String(raw ?? "").split("\0").filter(Boolean);
+  const paths = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i];
+    if (entry.length < 4) continue;
+    const status = entry.slice(0, 2);
+    paths.push(entry.slice(3));
+    // Rename/copy emits the source path as its own following NUL-delimited
+    // field; record both sides so neither end escapes the scan.
+    if (status[0] === "R" || status[0] === "C") {
+      i += 1;
+      if (entries[i]) paths.push(entries[i]);
+    }
+  }
+  return paths;
 }

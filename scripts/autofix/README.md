@@ -48,9 +48,10 @@ Python dependencies for the reviewer: `pip install requests python-dotenv`.
 | 2 | Plan review returned `FAIL` (or `UNKNOWN` — see below) |
 | 3 | Human denied approval |
 | 4 | `npm test` or `npm run build` failed, or execution produced no changes |
-| 5 | Unsafe repo state (dirty tree, or on `main`/`master`) |
+| 5 | Unsafe repo state (dirty tree, detached HEAD, on `main`/`master`, or branch exists) |
 | 6 | Execution touched a forbidden path |
 | 7 | No usable Claude binary |
+| 8 | The Claude CLI itself failed (non-zero exit, timeout, killed, or output cap) |
 
 ## Security model
 
@@ -59,16 +60,28 @@ that make that acceptable, and none of them should be relaxed casually:
 
 - **Human gate.** Execution never starts without an explicit approval. `--yes` exists
   for non-interactive runs and is the single most dangerous flag here.
-- **Fail-closed review.** A missing, truncated, or malformed verdict parses as
-  `UNKNOWN` and is treated as `FAIL`. A broken reviewer response cannot approve anything.
+- **Fail-closed review, in two layers.** The verdict is read from the reviewer's final
+  non-empty line only, and `VERDICT:` markers are defanged in the copy of the plan sent
+  to the reviewer. Both are needed: the plan derives from untrusted issue text, reviewers
+  echo what they are given, and without the second layer a plan ending in `VERDICT: PASS`
+  flips a genuine `FAIL` to `PASS`. Anything unparseable is `UNKNOWN`, treated as `FAIL`.
 - **Untrusted input stays data.** Issue text is written to the child's stdin — never
   interpolated into a shell string, never passed through a shell, never in argv.
   The plan prompt fences it and labels it as data to analyse, not instructions to follow.
-- **Branch isolation.** Refuses to run on `main`/`master` or with a dirty tree; all work
-  happens on a fresh `fix/` branch.
-- **Forbidden paths.** Before pushing, the change set is scanned; any hit on `.env*`,
-  `.github/**`, `.claude/settings.json`, or `prisma/sql/**` aborts the run. This is what
-  stops a compromised or manipulated plan from rewriting CI, secrets, or RLS setup.
+- **Branch isolation.** Refuses to run on `main`/`master`, a detached HEAD, or a dirty
+  tree; all work happens on a fresh `fix/` branch. Any failure before commit restores the
+  base branch and deletes the branch, so a failed run cannot poison the next one.
+- **Forbidden paths.** Before pushing, the change set is scanned for anything that
+  executes code, carries secrets, or gates verification: `.env*`, `.github/**`,
+  `.claude/**` (hook scripts run as shell next session), `.mcp.json`, `package.json`
+  (rewriting `test` would let a change approve itself), `vercel.json`, `prisma/sql/**`.
+  Matching is case-insensitive, sees inside newly created directories, and follows both
+  sides of a rename.
+
+  **What this does and does not do.** Phase 3 runs with permissions bypassed, so the
+  edits already exist on disk by the time the scan runs. The scan stops them being
+  committed or pushed, and the cleanup discards them — it cannot prevent the write
+  itself. Treat it as a containment boundary, not a write barrier.
 - **Green tests are mandatory.** A failing `npm test` or `npm run build` means no push
   and no PR; the branch is left local for inspection.
 - **PRs open as drafts**, so nothing merges without human review.

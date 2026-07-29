@@ -10,14 +10,23 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-missing=()
-for tool in node git python3 gh; do
-  command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+# gh is only needed when a PR will actually be created.
+required="node git python3"
+case " $* " in
+  *" --no-pr "*|*" --dry-run "*|*" --help "*|*" -h "*) ;;
+  *) required="$required gh" ;;
+esac
+
+# Plain string accumulator, not an array: under `set -u`, expanding an empty
+# array is an unbound-variable error on bash 3.2 (stock macOS) and 4.2.
+missing=""
+for tool in $required; do
+  command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
 done
 
-if [ ${#missing[@]} -gt 0 ]; then
-  echo "error: required tool(s) not on PATH: ${missing[*]}" >&2
-  echo "  node/git/python3 are required; gh is required unless you pass --no-pr" >&2
+if [ -n "$missing" ]; then
+  echo "error: required tool(s) not on PATH:$missing" >&2
+  echo "  gh is only required when creating a PR — pass --no-pr to skip it" >&2
   exit 1
 fi
 

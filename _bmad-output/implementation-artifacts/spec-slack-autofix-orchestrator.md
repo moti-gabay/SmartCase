@@ -2,7 +2,7 @@
 title: 'Autonomous Issue-Resolution Orchestrator (plan → review → execute → PR)'
 type: 'feature'
 created: '2026-07-29'
-status: 'in-progress'
+status: 'in-review'
 review_loop_iteration: 0
 baseline_commit: 'c3c5288'
 context:
@@ -83,6 +83,8 @@ context:
 
 - **2026-07-29 — pre-implementation, human-directed.** Slack triage found `scripts/slack-daemon.js` calls bare `execFile("claude", …)`; on this machine `$PATH` resolves to a Windows npm shim that errors "native binary not installed". Never exercised (`logs/slack-events.jsonl` absent), so it is latent, not observed-failing. Human folded the fix into this pass: Code Map "Do not modify" lifted, one task added reusing `resolveClaudeBin()`. Avoids shipping an orchestrator that resolves the binary correctly while the sibling daemon beside it still cannot start. KEEP: `resolveClaudeBin` stays a `guards.mjs` export with injected `env`/`fs` so both callers share one tested resolution order.
 
+- **2026-07-29 — review round 1 (Blind Hunter + Edge Case Hunter, independent).** Two context-free reviewers converged on ~11 identical defects. Seven were reproduced empirically before any fix. Two were security-critical: (a) `parseVerdict`'s documented "last VERDICT: match wins" rule was forgeable — a reviewer returning `VERDICT: FAIL` parsed as `PASS` when the plan's tail was echoed, defeating Phase 2 entirely; (b) the frozen forbidden-path list of four entries missed every real escalation vector — `.claude/hooks/*` (runs as shell next session), `.mcp.json`, `package.json` (rewriting `test` self-approves the verification gate), and case variants, all verified ALLOWED. Also confirmed: `git status --porcelain` parsing missed files inside new directories, both sides of renames, and octal-quoted Hebrew paths; `\z` is a literal `z` in JS regex; documented piped-stdin usage hung forever at the approval gate. Amended the Design Notes verdict rule to anchor on the reviewer's final non-empty line plus defang `VERDICT:` markers in the reviewer's copy of the plan (two layers, since anchoring alone does not stop a plan that ends the response). All fixes applied in place as `patch` — no revert — because each is localised to a pure function with test coverage. KEEP: `guards.mjs` stays pure and dependency-injected; `plan.md` stays pristine for the human while only the reviewer's copy is neutralised; over-blocking paths is preferred to under-blocking since a false positive only aborts a run.
+
 ## Design Notes
 
 Phase boundary contract — the shape a future Slack adapter binds to:
@@ -95,7 +97,7 @@ await runPipeline(issueText, {
 }, { provider: "gemini", createPr: true, dryRun: false });
 ```
 
-`parseVerdict` scans for the last `VERDICT:` line and returns `UNKNOWN` when absent; `UNKNOWN` is treated as FAIL (fail-closed) so a truncated or malformed reviewer response can never green-light execution.
+`parseVerdict` reads only the reviewer's **final non-empty line**, and rejects it if fenced or quoted; `neutralizeVerdictMarkers` defangs `VERDICT:` in the copy of the plan sent to the reviewer. Both layers are required — anchoring alone does not help when the echoed plan ends the response. Anything else returns `UNKNOWN`, treated as FAIL (fail-closed).
 
 ## Verification
 
