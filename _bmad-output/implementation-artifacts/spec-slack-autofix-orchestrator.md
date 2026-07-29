@@ -2,8 +2,9 @@
 title: 'Autonomous Issue-Resolution Orchestrator (plan → review → execute → PR)'
 type: 'feature'
 created: '2026-07-29'
-status: 'ready-for-dev'
+status: 'in-progress'
 review_loop_iteration: 0
+baseline_commit: 'c3c5288'
 context:
   - '{project-root}/CLAUDE.md'
 ---
@@ -62,15 +63,15 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `scripts/autofix/guards.mjs` -- pure, dependency-free exports: `resolveClaudeBin(env, fs)`, `slugify(text)`, `runIdFor(text, nowIso)`, `branchNameFor(runId)`, `parseVerdict(reviewMarkdown)` → `'PASS'|'FAIL'|'UNKNOWN'`, `findForbiddenPaths(changedPaths)` -- isolates every decision worth testing from the I/O shell.
-- [ ] `scripts/autofix/pipeline.mjs` -- exports `runPipeline(issueText, hooks)` running Phases 1–4 via `execFile`; `hooks` = `{ onPhase, requestApproval, report }` with CLI defaults. Writes `plan.md`/`review.md` to `_bmad-output/autofix/<runId>/` and appends to `logs/autofix-events.jsonl`.
-- [ ] `scripts/autofix/cli.mjs` -- argv parsing (`--provider`, `--yes`, `--no-pr`, `--dry-run`), reads issue from argv or stdin, maps exit codes per the matrix.
-- [ ] `scripts/autofix/autofix.sh` -- bash wrapper: `set -euo pipefail`, cd to repo root, preflight `git`/`gh`/`node`/`python3`, `exec node scripts/autofix/cli.mjs "$@"` -- gives a single documented entrypoint.
-- [ ] `scripts/external-code-review.py` -- add `--mode {diff,plan}` and `--plan-file`; in `plan` mode swap `SYSTEM_PROMPT` for a plan-audit rubric (RCA soundness, security/PII, architecture fit, test coverage) that must end with a literal `VERDICT: PASS` or `VERDICT: FAIL` line. Default stays `diff` -- no behavior change for existing callers.
-- [ ] `tests/autofix-guards.test.ts` -- cover every `guards.mjs` export against the I/O matrix rows (binary resolution order, verdict parsing incl. `UNKNOWN`, forbidden-path detection, slug/branch determinism and injection-hostile input).
-- [ ] `scripts/slack-daemon.js` -- replace the bare `execFile("claude", …)` with `resolveClaudeBin()` from `guards.mjs` and fail loudly (log + `say`) when no usable binary is found -- closes the latent break where `$PATH` resolves to a non-functional shim.
-- [ ] `package.json` -- add `"autofix": "bash scripts/autofix/autofix.sh"`.
-- [ ] `scripts/autofix/README.md` -- required env (`CLAUDE_BIN`, `GEMINI_API_KEY`/`OPENAI_API_KEY`, `GH_TOKEN` or `gh auth login`), exit-code table, and the security model.
+- [x] `scripts/autofix/guards.mjs` -- pure, dependency-free exports: `resolveClaudeBin(env, fs)`, `slugify(text)`, `runIdFor(text, nowIso)`, `branchNameFor(runId)`, `parseVerdict(reviewMarkdown)` → `'PASS'|'FAIL'|'UNKNOWN'`, `findForbiddenPaths(changedPaths)` -- isolates every decision worth testing from the I/O shell.
+- [x] `scripts/autofix/pipeline.mjs` -- exports `runPipeline(issueText, hooks)` running Phases 1–4 via `execFile`; `hooks` = `{ onPhase, requestApproval, report }` with CLI defaults. Writes `plan.md`/`review.md` to `_bmad-output/autofix/<runId>/` and appends to `logs/autofix-events.jsonl`.
+- [x] `scripts/autofix/cli.mjs` -- argv parsing (`--provider`, `--yes`, `--no-pr`, `--dry-run`), reads issue from argv or stdin, maps exit codes per the matrix.
+- [x] `scripts/autofix/autofix.sh` -- bash wrapper: `set -euo pipefail`, cd to repo root, preflight `git`/`gh`/`node`/`python3`, `exec node scripts/autofix/cli.mjs "$@"` -- gives a single documented entrypoint.
+- [x] `scripts/external-code-review.py` -- add `--mode {diff,plan}` and `--plan-file`; in `plan` mode swap `SYSTEM_PROMPT` for a plan-audit rubric (RCA soundness, security/PII, architecture fit, test coverage) that must end with a literal `VERDICT: PASS` or `VERDICT: FAIL` line. Default stays `diff` -- no behavior change for existing callers.
+- [x] `tests/autofix-guards.test.ts` -- cover every `guards.mjs` export against the I/O matrix rows (binary resolution order, verdict parsing incl. `UNKNOWN`, forbidden-path detection, slug/branch determinism and injection-hostile input).
+- [x] `scripts/slack-daemon.js` -- replace the bare `execFile("claude", …)` with `resolveClaudeBin()` from `guards.mjs` and fail loudly (log + `say`) when no usable binary is found -- closes the latent break where `$PATH` resolves to a non-functional shim.
+- [x] `package.json` -- add `"autofix": "bash scripts/autofix/autofix.sh"`.
+- [x] `scripts/autofix/README.md` -- required env (`CLAUDE_BIN`, `GEMINI_API_KEY`/`OPENAI_API_KEY`, `GH_TOKEN` or `gh auth login`), exit-code table, and the security model.
 
 **Acceptance Criteria:**
 - Given `--dry-run`, when the pipeline runs, then it prints the resolved binary, runId, branch name, and provider, and makes zero git/network mutations.
@@ -88,10 +89,10 @@ Phase boundary contract — the shape a future Slack adapter binds to:
 
 ```js
 await runPipeline(issueText, {
-  onPhase: (n, name, detail) => {},          // progress
-  requestApproval: async (plan, review) => true,  // gate before Phase 3
-  report: async (summary) => {},             // final RCA + tests + PR link
-});
+  onPhase: (n, name, detail) => {},               // progress
+  requestApproval: async (plan, review, meta) => true,  // gate before Phase 3
+  report: async (summary) => {},                  // final RCA + tests + PR link
+}, { provider: "gemini", createPr: true, dryRun: false });
 ```
 
 `parseVerdict` scans for the last `VERDICT:` line and returns `UNKNOWN` when absent; `UNKNOWN` is treated as FAIL (fail-closed) so a truncated or malformed reviewer response can never green-light execution.

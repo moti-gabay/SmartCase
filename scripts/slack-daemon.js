@@ -8,6 +8,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pkg from "@slack/bolt";
 
+import { resolveClaudeBin } from "./autofix/guards.mjs";
+
 const { App } = pkg;
 
 // Append-only JSONL event log (logs/ at repo root, gitignored).
@@ -44,6 +46,18 @@ app.message(async ({ message, say }) => {
   const text = message.text?.trim();
   if (!text) return;
 
+  // Resolve the CLI explicitly. A bare "claude" off $PATH resolves to the
+  // Windows npm shim under WSL, which is executable but non-functional — the
+  // run would fail with a confusing error long after the ack was posted.
+  const claude = resolveClaudeBin();
+  if (!claude.path) {
+    const detail = `no usable claude binary found — tried:\n${claude.tried.join("\n")}`;
+    console.error(`[claude error] ${detail}`);
+    logEvent({ channel: message.channel, prompt: text, status: "failed", duration_ms: 0, exit_code: 127 });
+    await say(`⚠️ Cannot run: no usable \`claude\` binary. Set \`CLAUDE_BIN\` and restart the daemon.`);
+    return;
+  }
+
   await say(`🤖 Received instruction! Starting execution: ${text}...`);
 
   const startedAt = Date.now();
@@ -59,7 +73,7 @@ app.message(async ({ message, say }) => {
   // interpolating it into a shell string, so shell metacharacters in an untrusted
   // Slack message can't escape into arbitrary shell commands.
   execFile(
-    "claude",
+    claude.path,
     ["-p", text],
     { maxBuffer: 10 * 1024 * 1024 },
     (error, stdout, stderr) => {
