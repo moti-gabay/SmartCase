@@ -9,6 +9,9 @@ import { classifyReply, classifyReaction, isAllowed } from "./guards.mjs";
 /** Slack answers within minutes or not at all; a stuck gate must not hold a run open forever. */
 export const DEFAULT_APPROVAL_TIMEOUT_MS = 30 * 60_000;
 
+/**
+ * @param {{timeoutMs?: number, onResolved?: (r: {threadTs: string, decision: string, actor: string|null}) => void}} [opts]
+ */
 export function createApprovalRegistry({ timeoutMs = DEFAULT_APPROVAL_TIMEOUT_MS, onResolved } = {}) {
   const pending = new Map(); // thread_ts -> { resolve, timer, allowlist, promptTs }
 

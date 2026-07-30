@@ -51,7 +51,10 @@ context:
 | Non-allowlisted reaction | Outsider adds ✅ | Ignored; run keeps waiting | Silent |
 | Concurrent trigger | Second mention while a run is active | Refused in-thread naming the active run | No second run |
 | Pipeline failure | Any non-zero exit from `runPipeline` | Failure reported in-thread with exit code and reason | Logged |
-| Missing scope | Token lacks `reactions:read` | Daemon exits at startup naming the scope | Exit 1 |
+| Missing required scope | Token lacks `chat:write` / `channels:history` / `users:read` | Daemon exits at startup naming the scope | Exit 1 |
+| Missing optional scope | Token lacks `reactions:read` | Daemon starts, warns, disables ✅/❌ approval, says so in the prompt; reply approval unaffected | Warn only |
+| **Transport dies mid-session** | WebSocket drops (pong timeouts) while the process stays alive | Every transition logged to JSONL; exits non-zero after 3 consecutive failures so a supervisor restarts it | Exit 1 |
+| Transport recovers | Socket reconnects before the failure threshold | `connected` logged, failure counter reset, no restart | N/A |
 
 </frozen-after-approval>
 
@@ -77,6 +80,13 @@ context:
 - Given a run awaiting approval, when a non-allowlisted user reacts ✅, then the run stays pending and no approval is recorded.
 - Given a run in progress, when a second trigger arrives, then no second pipeline starts and the second thread receives a refusal.
 - Given any trigger, approval, denial, or refusal, then `logs/slack-events.jsonl` gains a line naming the user, thread, and outcome.
+
+## Spec Change Log
+
+- **2026-07-30 — live test, human-directed.** Two amendments from the first real run against Slack.
+  (a) The reinstalled app granted `reactions:write` (which lets a bot *add* reactions) rather than `reactions:read` (which delivers `reaction_added` events) — CLAUDE.md's scope table names the former, so following the docs produces exactly that grant. Hard-failing on it was wrong: reaction approval is one of two input paths and reply approval needs only `channels:history`. Split into `REQUIRED_SCOPES` and `OPTIONAL_SCOPES`; missing optional scopes warn and disable one capability each.
+  (b) **The matrix had no row for the transport dying.** In testing the WebSocket died after 14 pong timeouts while the process stayed alive and the startup banner still read "listening" — both the operator and the agent believed it was healthy for ~30 minutes, and a real mention was lost because Socket Mode does not replay missed events. Added transport supervision: every transition audited to JSONL, non-zero exit after 3 consecutive failures. Exiting is correct here — a supervisor can restore a socket, but an externally-undetectable live-process-with-dead-socket cannot be recovered from.
+  KEEP: fail-closed allowlist; silence (not a refusal message) for non-allowlisted triggers; timeout denies.
 
 ## Design Notes
 

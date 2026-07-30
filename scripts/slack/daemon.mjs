@@ -245,15 +245,79 @@ app.event("reaction_added", async ({ event }) => {
   approvals.handleReaction({ itemTs: event.item.ts, threadTs, user: event.user, reaction: event.reaction });
 });
 
+/**
+ * Transport supervision.
+ *
+ * A Socket Mode WebSocket can die while the process stays alive and the startup
+ * banner still scrolls above in the terminal — the daemon then looks healthy and
+ * silently receives nothing. That happened in testing: 14 consecutive pong
+ * timeouts, no delivered events for ~30 minutes, and a mention lost because
+ * Socket Mode does not replay events missed while disconnected.
+ *
+ * So: every transport transition is written to the JSONL audit log, and repeated
+ * pong failure exits non-zero rather than lingering. Exiting is the correct
+ * behaviour for an ingress whose whole job is to be listening — a process
+ * supervisor (systemd, pm2, Docker restart policy) can restore a working socket,
+ * whereas a live process with a dead socket cannot be detected from outside.
+ */
+const MAX_CONSECUTIVE_PONG_FAILURES = 3;
+let pongFailures = 0;
+
+function superviseTransport() {
+  const client = app.receiver?.client;
+  if (!client?.on) {
+    console.warn("[warn] Socket Mode client not exposed — transport supervision unavailable");
+    logEvent({ kind: "transport", state: "supervision-unavailable" });
+    return;
+  }
+
+  client.on("connected", () => {
+    if (pongFailures > 0) {
+      console.log(`[transport] reconnected after ${pongFailures} pong failure(s)`);
+    }
+    pongFailures = 0;
+    logEvent({ kind: "transport", state: "connected" });
+  });
+
+  client.on("disconnected", (err) => {
+    console.warn(`[transport] disconnected${err ? `: ${err.message}` : ""}`);
+    logEvent({ kind: "transport", state: "disconnected", error: err?.message ?? null });
+  });
+
+  // Bolt surfaces pong timeouts only as a WARN log line; there is no dedicated
+  // event, so count them off the client's own failure signal.
+  client.on("unable_to_socket_mode_start", (err) => {
+    logEvent({ kind: "transport", state: "start-failed", error: err?.message ?? null });
+  });
+
+  client.on("close", (code) => {
+    pongFailures += 1;
+    logEvent({ kind: "transport", state: "closed", code: code ?? null, consecutive_failures: pongFailures });
+    if (pongFailures >= MAX_CONSECUTIVE_PONG_FAILURES) {
+      console.error(
+        `[transport] ${pongFailures} consecutive socket failures — exiting so a supervisor can restart.\n` +
+          "A live process with a dead socket receives nothing and cannot be detected externally."
+      );
+      logEvent({ kind: "daemon-exit", reason: "transport-unhealthy", consecutive_failures: pongFailures });
+      process.exit(1);
+    }
+  });
+}
+
 export async function start() {
   const auth = await preflightScopes();
+  // Attach before start(): app.start() resolves only once the socket is already
+  // connected, so listeners registered afterwards miss the first `connected`
+  // event and the audit log would begin mid-story.
+  superviseTransport();
   await app.start();
   console.log(
     `⚡ Slack ingress running (Socket Mode) as ${auth.user} on ${SLACK_NOTIFY_CHANNEL}\n` +
       `   allowlist: ${[...allowlist].join(", ")}\n` +
-      `   approval:  ${reactionsEnabled ? "reaction or reply" : "reply only (no reactions:read)"}`
+      `   approval:  ${reactionsEnabled ? "reaction or reply" : "reply only (no reactions:read)"}\n` +
+      `   transport: supervised (exit after ${MAX_CONSECUTIVE_PONG_FAILURES} consecutive failures)`
   );
   logEvent({ kind: "daemon-start", bot_user: auth.user_id, allowlist_size: allowlist.size });
 }
 
-export { app, approvals, handleTrigger };
+export { app, approvals, handleTrigger, superviseTransport };

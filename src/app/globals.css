@@ -15,7 +15,10 @@
   --color-sidebar-text:   #c7d2fe;
   --color-sidebar-muted:  #818cf8;
 
-  --font-sans: var(--font-rubik), 'Rubik', 'Heebo', ui-sans-serif, system-ui, sans-serif;
+  /* Latin first, then Hebrew: the two self-hosted subsets are separate families,
+     and CSS resolves fonts per glyph, so each script is served by the subset that
+     contains it. See the comment in layout.tsx for why they are not merged. */
+  --font-sans: var(--font-rubik-latin), var(--font-rubik-hebrew), 'Rubik', 'Heebo', ui-sans-serif, system-ui, sans-serif;
 }
 
 html {

@@ -53,6 +53,8 @@ const defaultIsExecutable = (path) => {
  * Windows npm shim, which is executable but non-functional — so PATH is the
  * last resort, never the first.
  *
+ * @param {Record<string, string|undefined>} [env] only CLAUDE_BIN, PATH and HOME are read
+ * @param {{isExecutable?: (p: string) => boolean, home?: string}} [deps]
  * @returns {{path: string|null, source: string|null, tried: string[]}}
  */
 export function resolveClaudeBin(env = process.env, deps = {}) {
