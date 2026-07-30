@@ -44,6 +44,39 @@ before `$PATH` for this reason. `scripts/slack-daemon.js` shares the same resolv
 
 Python dependencies for the reviewer: `pip install requests python-dotenv`.
 
+## Slack ingress (G1)
+
+`npm run slack-daemon` runs the Socket Mode adapter in `scripts/slack/`. An allowlisted
+user mentions the bot with an issue; the daemon drives the same `runPipeline` and reports
+every phase into that thread.
+
+```
+@SmartCase the tag filter drops cases that have two tags
+```
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN` | yes | Bot token + app-level token (Socket Mode) |
+| `SLACK_NOTIFY_CHANNEL` | yes | The only channel that can trigger runs |
+| `SLACK_ALLOWED_USERS` | **yes** | Comma/space separated user IDs. Empty means the daemon refuses to start — never "anyone" |
+
+Required scopes: `chat:write`, `channels:history`, `reactions:read`, `users:read`. The
+daemon verifies these at startup and exits naming what is missing. **Scope changes only
+take effect after reinstalling the app** — editing the manifest is not enough.
+
+**Approval.** When the plan passes external review, the daemon posts a prompt in the
+thread. React ✅ or reply `אישור` / `approve` to proceed; ❌ or `דחייה` / `deny` to stop.
+Only allowlisted users count — an outsider's reaction is ignored and the run keeps waiting.
+The reply must be *only* the decision word: "approve after you check X" is a conversation,
+not consent. No answer within 30 minutes denies the run.
+
+**Concurrency.** One run per daemon process. A trigger arriving mid-run is refused in its
+thread, never queued.
+
+**What is not posted to Slack:** plan bodies, review text, and raw `claude` output stay in
+the repo under `_bmad-output/autofix/<runId>/`. The thread gets status lines, the approval
+prompt, and the final summary.
+
 ## Exit codes
 
 | Code | Meaning |
