@@ -15,7 +15,15 @@ import { fileURLToPath } from "node:url";
 import pkg from "@slack/bolt";
 
 import { runPipeline, AutofixError, EXIT } from "../autofix/pipeline.mjs";
-import { parseAllowlist, isAllowed, extractIssueText, shouldTrigger, missingScopes, REQUIRED_SCOPES } from "./guards.mjs";
+import {
+  parseAllowlist,
+  isAllowed,
+  extractIssueText,
+  shouldTrigger,
+  missingScopes,
+  missingOptionalScopes,
+  REQUIRED_SCOPES,
+} from "./guards.mjs";
 import { createApprovalRegistry } from "./approvals.mjs";
 
 const { App } = pkg;
@@ -62,6 +70,8 @@ const approvals = createApprovalRegistry({
 });
 
 let botUserId = null;
+/** Set at preflight: false when the token lacks reactions:read, so the ✅ path is off. */
+let reactionsEnabled = true;
 
 /**
  * Confirm the token actually carries the scopes this daemon needs.
@@ -75,8 +85,12 @@ async function preflightScopes() {
   botUserId = auth.user_id;
 
   const granted = auth.response_metadata?.scopes?.join(",") ?? auth.headers?.["x-oauth-scopes"] ?? "";
-  const missing = granted ? missingScopes(granted) : [];
+  if (!granted) {
+    console.warn("[warn] could not read granted scopes from auth.test; continuing without verification");
+    return auth;
+  }
 
+  const missing = missingScopes(granted);
   if (missing.length > 0) {
     console.error(
       `Slack token is missing required scope(s): ${missing.join(", ")}\n` +
@@ -86,8 +100,11 @@ async function preflightScopes() {
     );
     process.exit(1);
   }
-  if (!granted) {
-    console.warn("[warn] could not read granted scopes from auth.test; continuing without verification");
+
+  // Degrade rather than refuse: each optional scope costs exactly one capability.
+  for (const { scope, capability } of missingOptionalScopes(granted)) {
+    console.warn(`[warn] ${scope} not granted — disabled: ${capability}`);
+    if (scope === "reactions:read") reactionsEnabled = false;
   }
   return auth;
 }
@@ -168,7 +185,9 @@ async function handleTrigger(event) {
           `סקירה: \`${meta.reviewPath.replace(REPO_ROOT + "/", "")}\``,
           "",
           "אישור מריץ את הסוכן עם הרשאות מלאות על הריפו.",
-          "הגב ✅ (או `אישור`) לאישור, ❌ (או `דחייה`) לביטול.",
+          reactionsEnabled
+            ? "הגב ✅ (או `אישור`) לאישור, ❌ (או `דחייה`) לביטול."
+            : "השב `אישור` לאישור, או `דחייה` לביטול. (אישור בריאקציה מושבת — חסר scope `reactions:read`.)",
         ].join("\n"),
         threadTs
       );
@@ -218,6 +237,8 @@ app.message(async ({ message }) => {
 });
 
 app.event("reaction_added", async ({ event }) => {
+  // Without reactions:read Slack never delivers this; the guard keeps intent explicit.
+  if (!reactionsEnabled) return;
   if (event.item?.channel !== SLACK_NOTIFY_CHANNEL) return;
   const threadTs = activeRun?.threadTs;
   if (!threadTs) return;
@@ -229,7 +250,8 @@ export async function start() {
   await app.start();
   console.log(
     `⚡ Slack ingress running (Socket Mode) as ${auth.user} on ${SLACK_NOTIFY_CHANNEL}\n` +
-      `   allowlist: ${[...allowlist].join(", ")}`
+      `   allowlist: ${[...allowlist].join(", ")}\n` +
+      `   approval:  ${reactionsEnabled ? "reaction or reply" : "reply only (no reactions:read)"}`
   );
   logEvent({ kind: "daemon-start", bot_user: auth.user_id, allowlist_size: allowlist.size });
 }

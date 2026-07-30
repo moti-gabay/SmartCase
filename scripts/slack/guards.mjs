@@ -4,8 +4,24 @@
 // a run* and *who may approve one* is unit tested. The Bolt I/O lives in
 // daemon.mjs — keep it out of this file.
 
-/** Scopes the daemon cannot function without. Checked at startup, not on first use. */
-export const REQUIRED_SCOPES = ["chat:write", "channels:history", "reactions:read", "users:read"];
+/**
+ * Scopes the daemon genuinely cannot run without: post into threads, receive the
+ * mention and reply events, resolve user identity. Checked at startup.
+ */
+export const REQUIRED_SCOPES = ["chat:write", "channels:history", "users:read"];
+
+/**
+ * Scopes that enable one capability each. Missing ones degrade that capability
+ * and are warned about, never fatal.
+ *
+ * `reactions:read` powers *receiving* ✅/❌ on the approval prompt. Note it is
+ * distinct from `reactions:write`, which lets a bot *add* reactions — this daemon
+ * never does, so `reactions:write` grants it nothing. Without `reactions:read`
+ * the gate still works: an allowlisted user replies `אישור` / `approve` instead.
+ */
+export const OPTIONAL_SCOPES = {
+  "reactions:read": "approval by ✅/❌ reaction (reply-based approval still works)",
+};
 
 const APPROVE_REACTIONS = new Set(["white_check_mark", "heavy_check_mark", "+1", "thumbsup", "ok_hand"]);
 const DENY_REACTIONS = new Set(["x", "no_entry", "no_entry_sign", "-1", "thumbsdown"]);
@@ -100,13 +116,25 @@ export function shouldTrigger(event, { botUserId, allowlist } = {}) {
   return { run: true, reason: "ok" };
 }
 
-/** Scopes present on the token minus what we need. Empty array means good to go. */
-export function missingScopes(grantedHeader) {
-  const granted = new Set(
+function grantedSet(grantedHeader) {
+  return new Set(
     String(grantedHeader ?? "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean)
   );
+}
+
+/** Required scopes the token lacks. Empty array means good to start. */
+export function missingScopes(grantedHeader) {
+  const granted = grantedSet(grantedHeader);
   return REQUIRED_SCOPES.filter((scope) => !granted.has(scope));
+}
+
+/** Optional scopes the token lacks, with what each one costs. Never fatal. */
+export function missingOptionalScopes(grantedHeader) {
+  const granted = grantedSet(grantedHeader);
+  return Object.entries(OPTIONAL_SCOPES)
+    .filter(([scope]) => !granted.has(scope))
+    .map(([scope, capability]) => ({ scope, capability }));
 }

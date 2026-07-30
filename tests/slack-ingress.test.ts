@@ -10,6 +10,7 @@ import {
   classifyReaction,
   shouldTrigger,
   missingScopes,
+  missingOptionalScopes,
   REQUIRED_SCOPES,
 } from "../scripts/slack/guards.mjs";
 // @ts-ignore -- plain ESM module, no type declarations
@@ -132,8 +133,24 @@ test("shouldTrigger fails closed when the allowlist is empty", () => {
 
 test("missingScopes names exactly what the token lacks", () => {
   assert.deepEqual(missingScopes(REQUIRED_SCOPES.join(",")), []);
-  assert.deepEqual(missingScopes("channels:history,chat:write"), ["reactions:read", "users:read"]);
+  assert.deepEqual(missingScopes("channels:history,chat:write"), ["users:read"]);
   assert.deepEqual(missingScopes(""), REQUIRED_SCOPES);
+});
+
+test("reactions:read is optional, and reactions:write does not substitute for it", () => {
+  // The real grant from the reinstalled app: reactions:write, not reactions:read.
+  // reactions:write lets a bot ADD reactions; only reactions:read delivers
+  // reaction_added events. The daemon must still start, with the ✅ path off.
+  const granted = "channels:history,chat:write,users:read,users.profile:read,channels:read,reactions:write";
+  assert.deepEqual(missingScopes(granted), [], "must not block startup");
+  assert.deepEqual(
+    missingOptionalScopes(granted).map((m: { scope: string }) => m.scope),
+    ["reactions:read"]
+  );
+});
+
+test("missingOptionalScopes is empty once reactions:read is granted", () => {
+  assert.deepEqual(missingOptionalScopes([...REQUIRED_SCOPES, "reactions:read"].join(",")), []);
 });
 
 test("approval registry resolves on an allowlisted reaction", async () => {
