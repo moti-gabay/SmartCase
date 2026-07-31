@@ -44,6 +44,72 @@ before `$PATH` for this reason. `scripts/slack-daemon.js` shares the same resolv
 
 Python dependencies for the reviewer: `pip install requests python-dotenv`.
 
+## Slack ingress (G1)
+
+`npm run slack-daemon` runs the Socket Mode adapter in `scripts/slack/`. An allowlisted
+user mentions the bot with an issue; the daemon drives the same `runPipeline` and reports
+every phase into that thread.
+
+```
+@SmartCase the tag filter drops cases that have two tags
+```
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `SLACK_BOT_TOKEN` / `SLACK_APP_TOKEN` | yes | Bot token + app-level token (Socket Mode) |
+| `SLACK_NOTIFY_CHANNEL` | yes | The only channel that can trigger runs |
+| `SLACK_ALLOWED_USERS` | **yes** | Comma/space separated user IDs. Empty means the daemon refuses to start — never "anyone" |
+
+Required scopes: `chat:write`, `channels:history`, `reactions:read`, `users:read`. The
+daemon verifies these at startup and exits naming what is missing. **Scope changes only
+take effect after reinstalling the app** — editing the manifest is not enough.
+
+**Approval.** When the plan passes external review, the daemon posts a prompt in the
+thread. React ✅ or reply `אישור` / `approve` to proceed; ❌ or `דחייה` / `deny` to stop.
+Only allowlisted users count — an outsider's reaction is ignored and the run keeps waiting.
+The reply must be *only* the decision word: "approve after you check X" is a conversation,
+not consent. No answer within 30 minutes denies the run.
+
+**Concurrency.** One run per daemon process. A trigger arriving mid-run is refused in its
+thread, never queued.
+
+**What is not posted to Slack:** plan bodies, review text, and raw `claude` output stay in
+the repo under `_bmad-output/autofix/<runId>/`. The thread gets status lines, the approval
+prompt, and the final summary.
+
+## Execution guards
+
+| Guard | Mechanism | Configure |
+|---|---|---|
+| Spend ceiling | `--max-budget-usd` on every `claude` invocation | `AUTOFIX_MAX_BUDGET_USD` (default `2.0`) |
+| Wall clock | Per-phase timeouts | 10 min plan · 5 min review · 30 min execute · 15 min verify |
+| Kill switch | `npm run autofix:kill`, or reply `עצור` / `kill` in the Slack thread | — |
+| Output cap | Child stdout capped, process group killed on overflow | 32 MB |
+
+**There is no `--max-turns` in this CLI** (checked against v2.1.220) — the budget ceiling
+plus per-phase timeouts are what bound a runaway loop. Likewise there is no
+`claude kill <id>` subcommand, so termination is done at the process level: phases spawn
+`claude` **detached**, so the child's pid is also its process-group id, and it is published
+to `logs/autofix-active.json`. Killing the negated pid reaps the tool subprocesses Claude
+spawns — signalling only the direct child can strand them holding the stdio pipes, after
+which `close` never fires and the timeout cannot help.
+
+Hitting the budget is reported as a budget ceiling naming the env var, not as a bare
+non-zero exit, because raising the limit is a decision rather than a bug.
+
+## Notifications
+
+`runPipeline` accepts `hooks.onNotify(event, detail)`. Every event is also written to
+`logs/autofix-events.jsonl` with `"kind":"notification"`, so the audit trail survives a
+transport that is down.
+
+| Event | Fired when | Carries |
+|---|---|---|
+| `input_required` | The run reaches the approval gate and is blocked on a human | `runId`, `branch`, `planPath`, `reviewPath`, `verdict` |
+| `agent_completed` | The run reaches a terminal state | `outcome`, `exit_code`, `pr_url` or `error` |
+
+A throwing or absent `onNotify` never takes down the run it is reporting on.
+
 ## Exit codes
 
 | Code | Meaning |

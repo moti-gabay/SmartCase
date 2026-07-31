@@ -8,7 +8,7 @@
 // never interpolated into a shell string and never passed through a shell.
 
 import { spawn, execFile } from "node:child_process";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -41,6 +41,16 @@ export const EXIT = {
 /** Cap on a single child's stdout — a runaway transcript must not OOM the host. */
 const MAX_CHILD_OUTPUT = 32 * 1024 * 1024;
 
+/**
+ * Hard spend ceiling per `claude` invocation.
+ *
+ * `--max-budget-usd` is the CLI's own guard and only works with `--print`, which
+ * is how every phase runs. Note the CLI has no `--max-turns`: budget is the
+ * available bound on a runaway loop, so it does double duty as cost control and
+ * loop control. Per-phase timeouts cover the wall-clock case.
+ */
+const MAX_BUDGET_USD = Number(process.env.AUTOFIX_MAX_BUDGET_USD ?? 2.0);
+
 const TIMEOUTS = {
   version: 30_000,
   plan: 10 * 60_000,
@@ -52,6 +62,9 @@ const TIMEOUTS = {
 
 const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const LOG_FILE = join(REPO_ROOT, "logs", "autofix-events.jsonl");
+
+/** Where the active child's pid is published so `autofix:kill` can find it. */
+export const RUNFILE = join(REPO_ROOT, "logs", "autofix-active.json");
 
 export class AutofixError extends Error {
   constructor(code, message, detail = null) {
@@ -71,6 +84,95 @@ function logEvent(event) {
   }
 }
 
+/**
+ * Kill an entire process group. Children are spawned `detached`, so the child's
+ * pid is also its group id and the negated pid reaches every descendant.
+ * Best-effort: a group that already exited raises ESRCH, which is success.
+ */
+export function killGroup(pid, signal = "SIGKILL") {
+  if (!pid) return false;
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
+    try {
+      process.kill(pid, signal);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function publishRunfile(entry) {
+  try {
+    mkdirSync(dirname(RUNFILE), { recursive: true });
+    writeFileSync(RUNFILE, JSON.stringify(entry, null, 2), "utf8");
+  } catch (err) {
+    console.error(`[autofix] could not publish runfile: ${err.message}`);
+  }
+}
+
+function clearRunfile() {
+  try {
+    rmSync(RUNFILE, { force: true });
+  } catch {
+    /* nothing useful to do */
+  }
+}
+
+/**
+ * Turn a non-zero `claude` exit into something an operator can act on.
+ *
+ * The CLI prints its real error to stdout while stderr carries unrelated
+ * warnings, so a naive `tail(stderr)` reported a benign "claude.ai connectors
+ * are disabled" notice and buried the actual cause — an account usage cap. The
+ * run looked like an unexplained crash and had to be reproduced by hand to
+ * diagnose. Each pattern below is a condition with a different remedy, so each
+ * gets named rather than collapsed into "claude exited 1".
+ */
+export function explainClaudeFailure(code, stdout, stderr, budgetUsd = MAX_BUDGET_USD) {
+  const combined = `${stderr ?? ""}\n${stdout ?? ""}`;
+
+  if (/Exceeded USD budget/i.test(combined)) {
+    return new AutofixError(
+      EXIT.CLAUDE_FAILED,
+      `claude hit the $${budgetUsd} budget ceiling`,
+      "Raise AUTOFIX_MAX_BUDGET_USD if this issue genuinely needs a longer run."
+    );
+  }
+
+  const usageLimit = combined.match(/API Error: \d+ (You have reached your specified API usage limits[^\n]*)/i);
+  if (usageLimit) {
+    return new AutofixError(
+      EXIT.CLAUDE_FAILED,
+      "the Anthropic account has hit its API usage limit",
+      `${usageLimit[1].trim()}\nThis is an account-level cap, not the pipeline's --max-budget-usd ceiling; no tokens were spent. Raise the limit in the Anthropic console or wait for the reset.`
+    );
+  }
+
+  if (/API Error: 401|authentication_error|invalid x-api-key/i.test(combined)) {
+    return new AutofixError(
+      EXIT.CLAUDE_FAILED,
+      "the Anthropic API rejected the credentials",
+      "Check ANTHROPIC_API_KEY, or run `claude auth` if you intend to use a claude.ai login."
+    );
+  }
+
+  if (/API Error: 429|rate_limit_error/i.test(combined)) {
+    return new AutofixError(EXIT.CLAUDE_FAILED, "rate limited by the Anthropic API", "Retry shortly.");
+  }
+
+  // Nothing recognised: surface the CLI's own error lines from BOTH streams,
+  // filtering the warning noise that previously crowded out the real message.
+  const meaningful = combined
+    .split("\n")
+    .filter((line) => line.trim() && !/connectors are disabled|^\s*⚠/.test(line))
+    .slice(-12)
+    .join("\n");
+  return new AutofixError(EXIT.CLAUDE_FAILED, `claude exited ${code}`, meaningful || tail(stderr));
+}
+
 /** Last N lines — keeps failure reports useful without dumping a whole transcript. */
 function tail(text, lines = 30) {
   return String(text ?? "").trimEnd().split("\n").slice(-lines).join("\n");
@@ -86,9 +188,14 @@ async function git(args, cwd = REPO_ROOT) {
  * keeps untrusted issue text out of the process arguments entirely and sidesteps
  * ARG_MAX for long issue reports.
  */
-function runClaude(bin, args, prompt, timeoutMs) {
+function runClaude(bin, args, prompt, timeoutMs, context = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { cwd: REPO_ROOT, stdio: ["pipe", "pipe", "pipe"] });
+    // detached: the child leads its own process group, so killing -pid reaps
+    // grandchildren too. Claude spawns tool subprocesses; signalling only the
+    // direct child can leave those alive holding the stdio pipes, and then
+    // 'close' never fires and the timeout cannot save us.
+    const child = spawn(bin, args, { cwd: REPO_ROOT, stdio: ["pipe", "pipe", "pipe"], detached: true });
+    publishRunfile({ pid: child.pid, phase: context.phase ?? "claude", runId: context.runId ?? null, startedAt: new Date().toISOString() });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -102,13 +209,13 @@ function runClaude(bin, args, prompt, timeoutMs) {
 
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killGroup(child.pid);
     }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
       if (stdout.length > MAX_CHILD_OUTPUT) {
         overflowed = true;
-        child.kill("SIGKILL");
+        killGroup(child.pid);
         return;
       }
       stdout += chunk;
@@ -128,6 +235,7 @@ function runClaude(bin, args, prompt, timeoutMs) {
     });
     child.on("close", (code, signal) => {
       clearTimeout(timer);
+      clearRunfile();
       if (overflowed) {
         reject(new AutofixError(EXIT.CLAUDE_FAILED, `claude output exceeded ${MAX_CHILD_OUTPUT} bytes`, tail(stderr)));
       } else if (timedOut) {
@@ -135,7 +243,7 @@ function runClaude(bin, args, prompt, timeoutMs) {
       } else if (signal) {
         reject(new AutofixError(EXIT.CLAUDE_FAILED, `claude killed by ${signal}`, tail(stderr)));
       } else if (code !== 0) {
-        reject(new AutofixError(EXIT.CLAUDE_FAILED, `claude exited ${code}`, tail(stderr)));
+        reject(explainClaudeFailure(code, stdout, stderr));
       } else {
         resolve(stdout);
       }
@@ -285,6 +393,20 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
 
   const log = (status, phase, extra = {}) => logEvent({ runId, branch, phase, status, ...extra });
 
+  /**
+   * Lifecycle notification. Always audited to JSONL; additionally handed to
+   * hooks.onNotify so a transport (Slack) can page someone. A throwing or
+   * missing hook must never take down the run it is reporting on.
+   */
+  const notify = (event, detail) => {
+    logEvent({ kind: "notification", event, ...detail });
+    try {
+      hooks.onNotify?.(event, detail);
+    } catch (err) {
+      console.error(`[autofix] onNotify(${event}) failed: ${err.message}`);
+    }
+  };
+
   onPhase(0, "preflight", "resolving claude binary");
   const claude = await preflightClaude(env);
   // Check repo state up front. Discovering a dirty tree only after a 10-minute
@@ -312,9 +434,21 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
     onPhase(1, "plan", "analyzing the issue (read-only)");
     const plan = await runClaude(
       claude.path,
-      ["--print", "--permission-mode", "plan", "--output-format", "text", "--disallowedTools", "Write", "Edit"],
+      [
+        "--print",
+        "--permission-mode",
+        "plan",
+        "--output-format",
+        "text",
+        "--max-budget-usd",
+        String(MAX_BUDGET_USD),
+        "--disallowedTools",
+        "Write",
+        "Edit",
+      ],
       PLAN_PROMPT(issue),
-      TIMEOUTS.plan
+      TIMEOUTS.plan,
+      { phase: "plan", runId }
     );
     if (!plan.trim()) {
       throw new AutofixError(EXIT.CLAUDE_FAILED, "planning produced no output", "claude returned an empty plan");
@@ -356,6 +490,10 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
 
     // ---- Human gate ------------------------------------------------------
     onPhase(3, "approval", "waiting for human approval");
+    // input_required: the run is now blocked on a human and will sit here until
+    // the timeout. Emitting it as its own event means an operator can be paged
+    // rather than discovering a stalled run later.
+    notify("input_required", { runId, branch, planPath, reviewPath, verdict, awaiting: "approval" });
     const approved = await requestApproval(plan, reviewOut, { runId, branch, planPath, reviewPath });
     if (!approved) {
       log("denied", "approval", { exit_code: EXIT.APPROVAL_DENIED });
@@ -376,7 +514,13 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
     branchCreated = true;
     log("ok", "branch", { base: baseBranch, start_point: startPoint, returned_to: startBranch });
 
-    await runClaude(claude.path, ["--print", "--dangerously-skip-permissions"], EXECUTE_PROMPT(plan), TIMEOUTS.execute);
+    await runClaude(
+      claude.path,
+      ["--print", "--dangerously-skip-permissions", "--max-budget-usd", String(MAX_BUDGET_USD)],
+      EXECUTE_PROMPT(plan),
+      TIMEOUTS.execute,
+      { phase: "execute", runId }
+    );
 
     const changed = await changedPaths();
 
@@ -454,13 +598,16 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
 
     const summary = { runId, branch, baseBranch, prUrl, verdict, testResults, planPath, reviewPath, filesChanged: changed.length };
     await report(summary);
+    notify("agent_completed", { runId, branch, outcome: "success", exit_code: EXIT.OK, pr_url: prUrl });
     log("success", "done", { exit_code: EXIT.OK, pr_url: prUrl });
     return summary;
   } catch (err) {
     const code = err instanceof AutofixError ? err.code : 1;
     log("failed", err instanceof AutofixError ? "pipeline" : "unexpected", { exit_code: code, error: err.message });
+    notify("agent_completed", { runId, branch, outcome: "failed", exit_code: code, error: err.message });
     throw err;
   } finally {
+    clearRunfile();
     // Restore the repo to how we found it. Without this, any failure after
     // `checkout -b` strands the working tree on the fix branch with the agent's
     // uncommitted edits — which then blocks every later run as "dirty", and
