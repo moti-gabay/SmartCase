@@ -1,85 +1,11 @@
-// Two-way bridge: Slack messages in SLACK_NOTIFY_CHANNEL trigger a Claude Code run.
+// Entrypoint for `npm run slack-daemon`.
 //
-//   npm run slack-daemon
-import "dotenv/config";
-import { execFile } from "node:child_process";
-import { appendFileSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import pkg from "@slack/bolt";
+// The implementation moved to scripts/slack/daemon.mjs when the daemon became
+// the G1 ingress for the autofix orchestrator. This file stays so the npm
+// script, any shell alias, and the docs keep working.
+import { start } from "./slack/daemon.mjs";
 
-const { App } = pkg;
-
-// Append-only JSONL event log (logs/ at repo root, gitignored).
-const LOG_FILE = join(dirname(dirname(fileURLToPath(import.meta.url))), "logs", "slack-events.jsonl");
-mkdirSync(dirname(LOG_FILE), { recursive: true });
-
-function logEvent(event) {
-  try {
-    appendFileSync(LOG_FILE, JSON.stringify({ timestamp: new Date().toISOString(), ...event }) + "\n");
-  } catch (err) {
-    console.error(`[log error] ${err.message}`);
-  }
-}
-
-const { SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_NOTIFY_CHANNEL } = process.env;
-
-if (!SLACK_BOT_TOKEN || !SLACK_APP_TOKEN || !SLACK_NOTIFY_CHANNEL) {
-  console.error(
-    "Missing SLACK_BOT_TOKEN, SLACK_APP_TOKEN, or SLACK_NOTIFY_CHANNEL in .env"
-  );
+start().catch((err) => {
+  console.error(`Slack ingress failed to start: ${err.message}`);
   process.exit(1);
-}
-
-const app = new App({
-  token: SLACK_BOT_TOKEN,
-  appToken: SLACK_APP_TOKEN,
-  socketMode: true,
 });
-
-app.message(async ({ message, say }) => {
-  if (message.channel !== SLACK_NOTIFY_CHANNEL) return;
-  if (message.bot_id || message.subtype === "bot_message") return;
-
-  const text = message.text?.trim();
-  if (!text) return;
-
-  await say(`🤖 Received instruction! Starting execution: ${text}...`);
-
-  const startedAt = Date.now();
-  logEvent({
-    channel: message.channel,
-    prompt: text,
-    status: "started",
-    duration_ms: null,
-    exit_code: null,
-  });
-
-  // execFile (not exec) — passes the message as a literal argv entry rather than
-  // interpolating it into a shell string, so shell metacharacters in an untrusted
-  // Slack message can't escape into arbitrary shell commands.
-  execFile(
-    "claude",
-    ["-p", text],
-    { maxBuffer: 10 * 1024 * 1024 },
-    (error, stdout, stderr) => {
-      if (stdout) console.log(`[claude stdout]\n${stdout}`);
-      if (stderr) console.error(`[claude stderr]\n${stderr}`);
-      if (error) console.error(`[claude error] ${error.message}`);
-      logEvent({
-        channel: message.channel,
-        prompt: text,
-        status: error ? "failed" : "success",
-        duration_ms: Date.now() - startedAt,
-        exit_code: error ? (typeof error.code === "number" ? error.code : 1) : 0,
-      });
-    }
-  );
-});
-
-(async () => {
-  await app.start();
-  console.log(
-    `⚡ Slack daemon running (Socket Mode) — listening on ${SLACK_NOTIFY_CHANNEL}`
-  );
-})();

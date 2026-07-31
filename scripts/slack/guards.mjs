@@ -1,0 +1,173 @@
+// Pure identity and intent parsing for the Slack ingress.
+//
+// Deterministic and dependency-free so every rule that decides *who may trigger
+// a run* and *who may approve one* is unit tested. The Bolt I/O lives in
+// daemon.mjs — keep it out of this file.
+
+/**
+ * Scopes the daemon genuinely cannot run without: post into threads, receive the
+ * mention and reply events, resolve user identity. Checked at startup.
+ */
+export const REQUIRED_SCOPES = ["chat:write", "channels:history", "users:read"];
+
+/**
+ * Scopes that enable one capability each. Missing ones degrade that capability
+ * and are warned about, never fatal.
+ *
+ * `reactions:read` powers *receiving* ✅/❌ on the approval prompt. Note it is
+ * distinct from `reactions:write`, which lets a bot *add* reactions — this daemon
+ * never does, so `reactions:write` grants it nothing. Without `reactions:read`
+ * the gate still works: an allowlisted user replies `אישור` / `approve` instead.
+ */
+export const OPTIONAL_SCOPES = {
+  "reactions:read": "approval by ✅/❌ reaction (reply-based approval still works)",
+};
+
+const APPROVE_REACTIONS = new Set(["white_check_mark", "heavy_check_mark", "+1", "thumbsup", "ok_hand"]);
+const DENY_REACTIONS = new Set(["x", "no_entry", "no_entry_sign", "-1", "thumbsdown"]);
+
+// Hebrew first — the office works in Hebrew and the operator will type it.
+//
+// Anchored whole-string (bar trailing punctuation), NOT prefix-matched, for two
+// reasons. `\b` is an ASCII word boundary and never matches after a Hebrew
+// letter, so a `\b`-terminated pattern silently fails on "אישור" — the gate
+// would wait out its timeout and deny. And for a gate that authorises
+// autonomous code execution, "approve" must mean the whole message: "approve
+// this only after you check X" is a conversation, not consent.
+const APPROVE_WORDS = /^(אישור|מאושר|לאשר|כן|approve|approved|yes|y|ok)[\s.!,]*$/iu;
+const DENY_WORDS = /^(דחייה|לדחות|דחה|לא|בטל|ביטול|deny|denied|reject|no|n|cancel|abort)[\s.!,]*$/iu;
+
+/**
+ * Parse `SLACK_ALLOWED_USERS` into a Set of user IDs.
+ *
+ * Accepts raw IDs or `<@U123>` mention syntax, comma or whitespace separated,
+ * so a value pasted straight out of Slack works. Returns an empty Set for empty
+ * input — callers must treat that as "nobody", never "everybody".
+ */
+export function parseAllowlist(raw) {
+  return new Set(
+    String(raw ?? "")
+      .split(/[\s,]+/)
+      .map((entry) => entry.trim().replace(/^<@|>$/g, "").toUpperCase())
+      .filter(Boolean)
+  );
+}
+
+/** Fail-closed: no allowlist means no one, and a missing user id is never allowed. */
+export function isAllowed(userId, allowlist) {
+  if (!userId || !allowlist || allowlist.size === 0) return false;
+  return allowlist.has(String(userId).toUpperCase());
+}
+
+/**
+ * Strip bot mentions and surrounding noise to get the issue text.
+ *
+ * Removes every `<@BOT>` occurrence rather than only a leading one — operators
+ * mention the bot mid-sentence — and unescapes Slack's HTML entities so the
+ * plan prompt sees what the human typed.
+ */
+export function extractIssueText(text, botUserId) {
+  let out = String(text ?? "");
+  if (botUserId) {
+    out = out.replace(new RegExp(`<@${String(botUserId).toUpperCase()}(\\|[^>]*)?>`, "gi"), " ");
+  }
+  return out
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Emergency stop for a run already executing — distinct from denying approval. */
+const KILL_WORDS = /^(עצור|הפסק|kill|stop|abort now)[\s.!,]*$/iu;
+
+/** @returns {'approve'|'deny'|null} — null means "not a decision", so keep waiting. */
+export function classifyReply(text) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return null;
+  if (DENY_WORDS.test(trimmed)) return "deny";
+  if (APPROVE_WORDS.test(trimmed)) return "approve";
+  return null;
+}
+
+/**
+ * Is this reply an emergency stop?
+ *
+ * Kept separate from classifyReply because the two act at different stages:
+ * `deny` refuses a run that has not started, while `kill` terminates one already
+ * executing with permissions bypassed. Conflating them would make a denial at
+ * the gate look like it could also stop a running agent, which it cannot.
+ */
+export function isKillCommand(text) {
+  return KILL_WORDS.test(String(text ?? "").trim());
+}
+
+/** @returns {'approve'|'deny'|null} */
+export function classifyReaction(name) {
+  const key = String(name ?? "").trim().toLowerCase().replace(/::skin-tone-\d+$/, "");
+  if (DENY_REACTIONS.has(key)) return "deny";
+  if (APPROVE_REACTIONS.has(key)) return "approve";
+  return null;
+}
+
+/**
+ * Should this event start a run?
+ *
+ * @returns {{run: boolean, reason: string}} — `reason` is what gets audited, so
+ * every ignored event is explainable after the fact.
+ */
+export function shouldTrigger(event, { botUserId, allowlist } = {}) {
+  if (!event || typeof event !== "object") return { run: false, reason: "malformed-event" };
+  // Never react to our own posts or any other app's — that is how a bot loop starts.
+  if (event.bot_id || event.subtype === "bot_message" || event.bot_profile) {
+    return { run: false, reason: "bot-authored" };
+  }
+  if (botUserId && event.user && String(event.user).toUpperCase() === String(botUserId).toUpperCase()) {
+    return { run: false, reason: "self-authored" };
+  }
+  if (!isAllowed(event.user, allowlist)) return { run: false, reason: "not-allowlisted" };
+  if (!extractIssueText(event.text, botUserId)) return { run: false, reason: "empty-issue" };
+  return { run: true, reason: "ok" };
+}
+
+/**
+ * Drop failure timestamps older than the rolling window.
+ *
+ * Counting failures over a window rather than consecutively is the point: a
+ * socket that flaps — close, reconnect, close — is as useless as a dead one, but
+ * a consecutive counter resets on every reconnect and never trips. Observed in
+ * production: the transport was effectively unusable for ~14 hours without the
+ * consecutive counter ever reaching its threshold.
+ */
+export function pruneFailureWindow(times, now, windowMs) {
+  return (times ?? []).filter((t) => Number.isFinite(t) && now - t <= windowMs);
+}
+
+/** @returns {boolean} true when failures within the window reach the limit. */
+export function isTransportFlapping(times, max) {
+  return (times ?? []).length >= max;
+}
+
+function grantedSet(grantedHeader) {
+  return new Set(
+    String(grantedHeader ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+}
+
+/** Required scopes the token lacks. Empty array means good to start. */
+export function missingScopes(grantedHeader) {
+  const granted = grantedSet(grantedHeader);
+  return REQUIRED_SCOPES.filter((scope) => !granted.has(scope));
+}
+
+/** Optional scopes the token lacks, with what each one costs. Never fatal. */
+export function missingOptionalScopes(grantedHeader) {
+  const granted = grantedSet(grantedHeader);
+  return Object.entries(OPTIONAL_SCOPES)
+    .filter(([scope]) => !granted.has(scope))
+    .map(([scope, capability]) => ({ scope, capability }));
+}

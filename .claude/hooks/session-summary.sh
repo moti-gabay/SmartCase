@@ -75,20 +75,32 @@ cp "$OUT_FILE" "$LAST_FILE" 2>/dev/null
 
 # --- Slack notification (best-effort, never fails the hook) ---
 notify_slack() {
-  # Pull Slack config from the environment, falling back to .env (not auto-loaded by hooks).
-  local webhook="${SLACK_WEBHOOK_URL:-}"
-  local token="${SLACK_BOT_TOKEN:-}"
-  local channel="${SLACK_NOTIFY_CHANNEL:-}"
+  # Pull Slack config from the environment, falling back to the repo env file
+  # (not auto-loaded by hooks).
+  #
+  # CI-specific values win. These summaries are machine chatter — one per commit —
+  # and they drowned the support channel (38 bot posts against 2 human messages
+  # over ~26h), making it unusable for humans and forcing any automated reader to
+  # filter nearly everything it fetches. Set SLACK_CI_WEBHOOK_URL to a webhook
+  # created against #smartcase-ci and this traffic leaves the support channel.
+  # An incoming webhook is bound to its channel when created, so redirecting
+  # requires a new webhook URL — editing this script alone cannot do it.
+  # Without the CI values set, behaviour is unchanged.
   local envfile="$REPO_ROOT/.env"
+  local webhook="${SLACK_CI_WEBHOOK_URL:-${SLACK_WEBHOOK_URL:-}}"
+  local token="${SLACK_BOT_TOKEN:-}"
+  local channel="${SLACK_CI_CHANNEL:-${SLACK_NOTIFY_CHANNEL:-}}"
 
   if [ -z "$webhook" ] && [ -f "$envfile" ]; then
-    webhook=$(grep -m1 '^SLACK_WEBHOOK_URL=' "$envfile" | cut -d= -f2- | tr -d '"' )
+    webhook=$(grep -m1 '^SLACK_CI_WEBHOOK_URL=' "$envfile" | cut -d= -f2- | tr -d '"')
+    [ -z "$webhook" ] && webhook=$(grep -m1 '^SLACK_WEBHOOK_URL=' "$envfile" | cut -d= -f2- | tr -d '"')
   fi
   if [ -z "$token" ] && [ -f "$envfile" ]; then
     token=$(grep -m1 '^SLACK_BOT_TOKEN=' "$envfile" | cut -d= -f2- | tr -d '"')
   fi
   if [ -z "$channel" ] && [ -f "$envfile" ]; then
-    channel=$(grep -m1 '^SLACK_NOTIFY_CHANNEL=' "$envfile" | cut -d= -f2- | tr -d '"')
+    channel=$(grep -m1 '^SLACK_CI_CHANNEL=' "$envfile" | cut -d= -f2- | tr -d '"')
+    [ -z "$channel" ] && channel=$(grep -m1 '^SLACK_NOTIFY_CHANNEL=' "$envfile" | cut -d= -f2- | tr -d '"')
   fi
 
   command -v curl >/dev/null 2>&1 || return 0
