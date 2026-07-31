@@ -11,7 +11,7 @@ import { TasksPanel } from "@/components/cases/tasks-panel";
 import { changeCaseStatus } from "@/lib/actions";
 import { LetterGenerator } from "@/components/ai/letter-generator";
 import { cn } from "@/lib/utils";
-import type { CaseDetail, CaseStatus } from "@/types";
+import type { CaseDetail, CaseStatus, UserSummary } from "@/types";
 import { FileText, Clock, CheckSquare, Sparkles, AlertTriangle } from "lucide-react";
 
 type TabId = "documents" | "activity" | "tasks" | "ai";
@@ -23,7 +23,7 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: "ai", label: "כלי AI", icon: Sparkles },
 ];
 
-export function CaseDetailView({ caseDetail }: { caseDetail: CaseDetail }) {
+export function CaseDetailView({ caseDetail, agents }: { caseDetail: CaseDetail; agents: UserSummary[] }) {
   const [caseData, setCaseData] = useState(caseDetail);
   const [activeTab, setActiveTab] = useState<TabId>("documents");
   const [aiSummaryOpen, setAiSummaryOpen] = useState(false);
@@ -139,7 +139,9 @@ export function CaseDetailView({ caseDetail }: { caseDetail: CaseDetail }) {
               </div>
             )}
 
-            {activeTab === "tasks" && <TasksPanel tasks={caseData.tasks} />}
+            {activeTab === "tasks" && (
+              <TasksPanel tasks={caseData.tasks} caseId={caseData.id} agents={agents} />
+            )}
 
             {activeTab === "ai" && (
               <AiToolsPanel caseId={caseData.id} clientName={caseData.client.fullName} />
