@@ -149,7 +149,13 @@ export function parseVerdict(reviewMarkdown) {
   // illustration or a quotation of the plan, never the reviewer's conclusion.
   if (!lastLine || lastLine.startsWith("```") || lastLine.startsWith(">")) return "UNKNOWN";
 
-  const match = lastLine.match(/^\**VERDICT\**\s*:\s*\**\s*(PASS|FAIL)\**\s*\.?$/i);
+  // Tolerate markdown heading markers: reviewers routinely emit "## VERDICT: PASS".
+  // This does not weaken either safety property — it is still the final line only,
+  // and VERDICT: markers are still defanged in the plan before the reviewer sees
+  // it — while a heading prefix alone was turning genuine verdicts into UNKNOWN.
+  const cleaned = lastLine.replace(/^#{1,6}\s*/, "");
+
+  const match = cleaned.match(/^\**VERDICT\**\s*:\s*\**\s*(PASS|FAIL)\**\s*\.?$/i);
   if (!match) return "UNKNOWN";
   return match[1].toUpperCase();
 }
