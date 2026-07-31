@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 // @ts-ignore -- plain ESM module, no type declarations
+import { explainClaudeFailure } from "../scripts/autofix/pipeline.mjs";
+// @ts-ignore -- plain ESM module, no type declarations
 import {
   resolveClaudeBin,
   slugify,
@@ -185,6 +187,32 @@ test("findForbiddenPaths catches nested env files and ./ prefixes", () => {
   const findings = findForbiddenPaths(["./.env.production", "config/.env.staging"]);
   assert.equal(findings.length, 2);
   assert.ok(findings.every((f: { reason: string }) => f.reason === "env file"));
+});
+
+test("explainClaudeFailure names an account usage cap rather than a bare exit", () => {
+  // The exact failure from run 4: the real cause was on stdout while stderr
+  // carried only a connectors warning, so the operator saw "claude exited 1".
+  const stderr = "⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set";
+  const stdout = "API Error: 400 You have reached your specified API usage limits. You will regain access on 2026-08-01 at 00:00 UTC.";
+  const err = explainClaudeFailure(1, stdout, stderr);
+  assert.match(err.message, /account has hit its API usage limit/);
+  assert.match(err.detail, /regain access on 2026-08-01/);
+  assert.match(err.detail, /not the pipeline's --max-budget-usd/, "must not be confused with our own ceiling");
+});
+
+test("explainClaudeFailure distinguishes budget, auth, and rate limits", () => {
+  assert.match(explainClaudeFailure(1, "", "Error: Exceeded USD budget (2)").message, /budget ceiling/);
+  assert.match(explainClaudeFailure(1, "API Error: 401 authentication_error", "").message, /rejected the credentials/);
+  assert.match(explainClaudeFailure(1, "API Error: 429 rate_limit_error", "").message, /rate limited/);
+});
+
+test("explainClaudeFailure drops warning noise but keeps the real error", () => {
+  const stderr = "⚠ claude.ai connectors are disabled because something\n";
+  const stdout = "Something genuinely unexpected went wrong";
+  const err = explainClaudeFailure(3, stdout, stderr);
+  assert.equal(err.message, "claude exited 3");
+  assert.match(err.detail, /Something genuinely unexpected/);
+  assert.ok(!/connectors are disabled/.test(err.detail), "warning noise must not crowd out the error");
 });
 
 test("findForbiddenPaths returns empty for a clean change set", () => {

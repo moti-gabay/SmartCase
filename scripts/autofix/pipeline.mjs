@@ -121,6 +121,58 @@ function clearRunfile() {
   }
 }
 
+/**
+ * Turn a non-zero `claude` exit into something an operator can act on.
+ *
+ * The CLI prints its real error to stdout while stderr carries unrelated
+ * warnings, so a naive `tail(stderr)` reported a benign "claude.ai connectors
+ * are disabled" notice and buried the actual cause — an account usage cap. The
+ * run looked like an unexplained crash and had to be reproduced by hand to
+ * diagnose. Each pattern below is a condition with a different remedy, so each
+ * gets named rather than collapsed into "claude exited 1".
+ */
+export function explainClaudeFailure(code, stdout, stderr, budgetUsd = MAX_BUDGET_USD) {
+  const combined = `${stderr ?? ""}\n${stdout ?? ""}`;
+
+  if (/Exceeded USD budget/i.test(combined)) {
+    return new AutofixError(
+      EXIT.CLAUDE_FAILED,
+      `claude hit the $${budgetUsd} budget ceiling`,
+      "Raise AUTOFIX_MAX_BUDGET_USD if this issue genuinely needs a longer run."
+    );
+  }
+
+  const usageLimit = combined.match(/API Error: \d+ (You have reached your specified API usage limits[^\n]*)/i);
+  if (usageLimit) {
+    return new AutofixError(
+      EXIT.CLAUDE_FAILED,
+      "the Anthropic account has hit its API usage limit",
+      `${usageLimit[1].trim()}\nThis is an account-level cap, not the pipeline's --max-budget-usd ceiling; no tokens were spent. Raise the limit in the Anthropic console or wait for the reset.`
+    );
+  }
+
+  if (/API Error: 401|authentication_error|invalid x-api-key/i.test(combined)) {
+    return new AutofixError(
+      EXIT.CLAUDE_FAILED,
+      "the Anthropic API rejected the credentials",
+      "Check ANTHROPIC_API_KEY, or run `claude auth` if you intend to use a claude.ai login."
+    );
+  }
+
+  if (/API Error: 429|rate_limit_error/i.test(combined)) {
+    return new AutofixError(EXIT.CLAUDE_FAILED, "rate limited by the Anthropic API", "Retry shortly.");
+  }
+
+  // Nothing recognised: surface the CLI's own error lines from BOTH streams,
+  // filtering the warning noise that previously crowded out the real message.
+  const meaningful = combined
+    .split("\n")
+    .filter((line) => line.trim() && !/connectors are disabled|^\s*⚠/.test(line))
+    .slice(-12)
+    .join("\n");
+  return new AutofixError(EXIT.CLAUDE_FAILED, `claude exited ${code}`, meaningful || tail(stderr));
+}
+
 /** Last N lines — keeps failure reports useful without dumping a whole transcript. */
 function tail(text, lines = 30) {
   return String(text ?? "").trimEnd().split("\n").slice(-lines).join("\n");
@@ -191,20 +243,7 @@ function runClaude(bin, args, prompt, timeoutMs, context = {}) {
       } else if (signal) {
         reject(new AutofixError(EXIT.CLAUDE_FAILED, `claude killed by ${signal}`, tail(stderr)));
       } else if (code !== 0) {
-        // Budget exhaustion is an operational limit, not a crash — say so, and
-        // name the knob, rather than reporting a bare non-zero exit.
-        const combined = `${stderr}\n${stdout}`;
-        if (/Exceeded USD budget/i.test(combined)) {
-          reject(
-            new AutofixError(
-              EXIT.CLAUDE_FAILED,
-              `claude hit the $${MAX_BUDGET_USD} budget ceiling`,
-              "Raise AUTOFIX_MAX_BUDGET_USD if this issue genuinely needs a longer run."
-            )
-          );
-          return;
-        }
-        reject(new AutofixError(EXIT.CLAUDE_FAILED, `claude exited ${code}`, tail(stderr)));
+        reject(explainClaudeFailure(code, stdout, stderr));
       } else {
         resolve(stdout);
       }
