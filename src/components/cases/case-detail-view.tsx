@@ -26,6 +26,17 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
 export function CaseDetailView({ caseDetail, agents }: { caseDetail: CaseDetail; agents: UserSummary[] }) {
   const [caseData, setCaseData] = useState(caseDetail);
   const [activeTab, setActiveTab] = useState<TabId>("documents");
+
+  // Resync when the server sends fresh data. Without this, router.refresh()
+  // re-runs the RSC tree and delivers a new caseDetail prop, but the copy taken
+  // at mount shadows it — so a task created in the panel below stays invisible
+  // until a manual reload. Adjusting during render rather than in an effect, per
+  // the repo's react-hooks/set-state-in-effect rule.
+  const [seenCaseDetail, setSeenCaseDetail] = useState(caseDetail);
+  if (seenCaseDetail !== caseDetail) {
+    setSeenCaseDetail(caseDetail);
+    setCaseData(caseDetail);
+  }
   const [aiSummaryOpen, setAiSummaryOpen] = useState(false);
   const [, startTransition] = useTransition();
 
