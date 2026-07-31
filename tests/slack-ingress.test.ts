@@ -10,6 +10,8 @@ import {
   classifyReaction,
   shouldTrigger,
   isKillCommand,
+  pruneFailureWindow,
+  isTransportFlapping,
   missingScopes,
   missingOptionalScopes,
   REQUIRED_SCOPES,
@@ -150,6 +152,39 @@ test("shouldTrigger refuses an empty issue and malformed events", () => {
 test("shouldTrigger fails closed when the allowlist is empty", () => {
   const result = shouldTrigger({ user: OWNER, text: `<@${BOT}> fix` }, { botUserId: BOT, allowlist: new Set() });
   assert.equal(result.run, false);
+});
+
+test("pruneFailureWindow keeps only failures inside the window", () => {
+  const now = 1_000_000;
+  const WINDOW = 30 * 60_000;
+  const times = [now - WINDOW - 1, now - WINDOW + 1, now - 60_000, now];
+  assert.deepEqual(pruneFailureWindow(times, now, WINDOW), [now - WINDOW + 1, now - 60_000, now]);
+});
+
+test("pruneFailureWindow tolerates empty and malformed input", () => {
+  assert.deepEqual(pruneFailureWindow([], 100, 50), []);
+  assert.deepEqual(pruneFailureWindow(null, 100, 50), []);
+  assert.deepEqual(pruneFailureWindow([NaN, undefined, 99], 100, 50), [99]);
+});
+
+test("a flapping transport trips the threshold even though it keeps reconnecting", () => {
+  // The defect this replaces: a consecutive counter reset on every `connected`,
+  // so a socket that closed and recovered repeatedly stayed "healthy" for ~14h.
+  const now = 1_000_000;
+  const WINDOW = 30 * 60_000;
+  // Three closes spread across the window, each followed by a reconnect.
+  const flapping = pruneFailureWindow([now - 20 * 60_000, now - 10 * 60_000, now], now, WINDOW);
+  assert.equal(flapping.length, 3);
+  assert.equal(isTransportFlapping(flapping, 3), true, "flapping must trip the threshold");
+});
+
+test("isolated failures spread beyond the window do not trip the threshold", () => {
+  const now = 1_000_000;
+  const WINDOW = 30 * 60_000;
+  // Same three failures, but an hour apart: an occasional blip, not a flap.
+  const occasional = pruneFailureWindow([now - 120 * 60_000, now - 60 * 60_000, now], now, WINDOW);
+  assert.equal(occasional.length, 1);
+  assert.equal(isTransportFlapping(occasional, 3), false);
 });
 
 test("missingScopes names exactly what the token lacks", () => {

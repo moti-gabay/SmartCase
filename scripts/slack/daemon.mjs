@@ -22,6 +22,8 @@ import {
   extractIssueText,
   shouldTrigger,
   isKillCommand,
+  pruneFailureWindow,
+  isTransportFlapping,
   missingScopes,
   missingOptionalScopes,
   REQUIRED_SCOPES,
@@ -284,13 +286,30 @@ app.event("reaction_added", async ({ event }) => {
  * Socket Mode does not replay events missed while disconnected.
  *
  * So: every transport transition is written to the JSONL audit log, and repeated
- * pong failure exits non-zero rather than lingering. Exiting is the correct
- * behaviour for an ingress whose whole job is to be listening — a process
- * supervisor (systemd, pm2, Docker restart policy) can restore a working socket,
- * whereas a live process with a dead socket cannot be detected from outside.
+ * failure exits non-zero rather than lingering. Exiting is the correct behaviour
+ * for an ingress whose whole job is to be listening — a process supervisor
+ * (systemd, pm2, Docker restart policy) can restore a working socket, whereas a
+ * live process with a dead socket cannot be detected from outside.
+ *
+ * Failures are counted over a rolling WINDOW, not consecutively. A first attempt
+ * counted consecutive closes and reset on every `connected`, which missed the
+ * failure mode that actually occurred in production: the socket flapped — close,
+ * reconnect, close — and stayed effectively unusable for ~14 hours without ever
+ * tripping the threshold, because no three closes were adjacent. A flapping
+ * transport loses events just as surely as a dead one.
+ *
+ * A prolonged gap is also treated as a failure in its own right: if the socket
+ * stays down past DISCONNECT_ALERT_MS the daemon stops waiting and exits, since
+ * Socket Mode never replays what was missed while it was away.
  */
-const MAX_CONSECUTIVE_PONG_FAILURES = 3;
-let pongFailures = 0;
+const FAILURE_WINDOW_MS = 30 * 60_000;
+const MAX_FAILURES_IN_WINDOW = 3;
+const DISCONNECT_ALERT_MS = 5 * 60_000;
+
+/** Timestamps of recent transport failures, pruned to the rolling window. */
+let failureTimes = [];
+let downSince = null;
+let downTimer = null;
 
 function superviseTransport() {
   const client = app.receiver?.client;
@@ -301,11 +320,14 @@ function superviseTransport() {
   }
 
   client.on("connected", () => {
-    if (pongFailures > 0) {
-      console.log(`[transport] reconnected after ${pongFailures} pong failure(s)`);
-    }
-    pongFailures = 0;
-    logEvent({ kind: "transport", state: "connected" });
+    const downMs = downSince ? Date.now() - downSince : 0;
+    if (downMs > 0) console.log(`[transport] reconnected after ${Math.round(downMs / 1000)}s down`);
+    downSince = null;
+    clearTimeout(downTimer);
+    downTimer = null;
+    // Deliberately does NOT clear failureTimes: a reconnect proves the socket
+    // came back, not that it is stable. Only the rolling window ages failures out.
+    logEvent({ kind: "transport", state: "connected", down_ms: downMs || null, failures_in_window: failureTimes.length });
   });
 
   client.on("disconnected", (err) => {
@@ -313,24 +335,44 @@ function superviseTransport() {
     logEvent({ kind: "transport", state: "disconnected", error: err?.message ?? null });
   });
 
-  // Bolt surfaces pong timeouts only as a WARN log line; there is no dedicated
-  // event, so count them off the client's own failure signal.
   client.on("unable_to_socket_mode_start", (err) => {
     logEvent({ kind: "transport", state: "start-failed", error: err?.message ?? null });
+    recordFailure("start-failed");
   });
 
   client.on("close", (code) => {
-    pongFailures += 1;
-    logEvent({ kind: "transport", state: "closed", code: code ?? null, consecutive_failures: pongFailures });
-    if (pongFailures >= MAX_CONSECUTIVE_PONG_FAILURES) {
-      console.error(
-        `[transport] ${pongFailures} consecutive socket failures — exiting so a supervisor can restart.\n` +
-          "A live process with a dead socket receives nothing and cannot be detected externally."
-      );
-      logEvent({ kind: "daemon-exit", reason: "transport-unhealthy", consecutive_failures: pongFailures });
-      process.exit(1);
-    }
+    logEvent({ kind: "transport", state: "closed", code: code ?? null });
+    beginDowntime();
+    recordFailure("closed");
   });
+}
+
+function exitUnhealthy(reason, detail) {
+  console.error(`[transport] ${detail}\nExiting so a supervisor can restart; a dead socket receives nothing.`);
+  logEvent({ kind: "daemon-exit", reason, failures_in_window: failureTimes.length });
+  process.exit(1);
+}
+
+/** Start the clock on a disconnection so prolonged downtime is itself a failure. */
+function beginDowntime() {
+  if (downSince) return;
+  downSince = Date.now();
+  downTimer = setTimeout(() => {
+    exitUnhealthy("transport-down-too-long", `socket down for over ${DISCONNECT_ALERT_MS / 60000} minutes`);
+  }, DISCONNECT_ALERT_MS);
+  downTimer.unref?.();
+}
+
+function recordFailure(kind) {
+  const now = Date.now();
+  failureTimes = pruneFailureWindow([...failureTimes, now], now, FAILURE_WINDOW_MS);
+  logEvent({ kind: "transport", state: "failure", cause: kind, failures_in_window: failureTimes.length });
+  if (isTransportFlapping(failureTimes, MAX_FAILURES_IN_WINDOW)) {
+    exitUnhealthy(
+      "transport-unhealthy",
+      `${failureTimes.length} socket failures within ${FAILURE_WINDOW_MS / 60000} minutes — the transport is flapping`
+    );
+  }
 }
 
 export async function start() {
@@ -344,7 +386,7 @@ export async function start() {
     `⚡ Slack ingress running (Socket Mode) as ${auth.user} on ${SLACK_NOTIFY_CHANNEL}\n` +
       `   allowlist: ${[...allowlist].join(", ")}\n` +
       `   approval:  ${reactionsEnabled ? "reaction or reply" : "reply only (no reactions:read)"}\n` +
-      `   transport: supervised (exit after ${MAX_CONSECUTIVE_PONG_FAILURES} consecutive failures)`
+      `   transport: supervised (exit after ${MAX_FAILURES_IN_WINDOW} failures / ${FAILURE_WINDOW_MS / 60000}min, or ${DISCONNECT_ALERT_MS / 60000}min down)`
   );
   logEvent({ kind: "daemon-start", bot_user: auth.user_id, allowlist_size: allowlist.size });
 }

@@ -131,6 +131,24 @@ export function shouldTrigger(event, { botUserId, allowlist } = {}) {
   return { run: true, reason: "ok" };
 }
 
+/**
+ * Drop failure timestamps older than the rolling window.
+ *
+ * Counting failures over a window rather than consecutively is the point: a
+ * socket that flaps — close, reconnect, close — is as useless as a dead one, but
+ * a consecutive counter resets on every reconnect and never trips. Observed in
+ * production: the transport was effectively unusable for ~14 hours without the
+ * consecutive counter ever reaching its threshold.
+ */
+export function pruneFailureWindow(times, now, windowMs) {
+  return (times ?? []).filter((t) => Number.isFinite(t) && now - t <= windowMs);
+}
+
+/** @returns {boolean} true when failures within the window reach the limit. */
+export function isTransportFlapping(times, max) {
+  return (times ?? []).length >= max;
+}
+
 function grantedSet(grantedHeader) {
   return new Set(
     String(grantedHeader ?? "")
