@@ -79,6 +79,9 @@ export function extractIssueText(text, botUserId) {
     .trim();
 }
 
+/** Emergency stop for a run already executing — distinct from denying approval. */
+const KILL_WORDS = /^(עצור|הפסק|kill|stop|abort now)[\s.!,]*$/iu;
+
 /** @returns {'approve'|'deny'|null} — null means "not a decision", so keep waiting. */
 export function classifyReply(text) {
   const trimmed = String(text ?? "").trim();
@@ -86,6 +89,18 @@ export function classifyReply(text) {
   if (DENY_WORDS.test(trimmed)) return "deny";
   if (APPROVE_WORDS.test(trimmed)) return "approve";
   return null;
+}
+
+/**
+ * Is this reply an emergency stop?
+ *
+ * Kept separate from classifyReply because the two act at different stages:
+ * `deny` refuses a run that has not started, while `kill` terminates one already
+ * executing with permissions bypassed. Conflating them would make a denial at
+ * the gate look like it could also stop a running agent, which it cannot.
+ */
+export function isKillCommand(text) {
+  return KILL_WORDS.test(String(text ?? "").trim());
 }
 
 /** @returns {'approve'|'deny'|null} */

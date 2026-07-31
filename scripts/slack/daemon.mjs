@@ -15,11 +15,13 @@ import { fileURLToPath } from "node:url";
 import pkg from "@slack/bolt";
 
 import { runPipeline, AutofixError, EXIT } from "../autofix/pipeline.mjs";
+import { killActiveRun } from "../autofix/kill.mjs";
 import {
   parseAllowlist,
   isAllowed,
   extractIssueText,
   shouldTrigger,
+  isKillCommand,
   missingScopes,
   missingOptionalScopes,
   REQUIRED_SCOPES,
@@ -195,6 +197,19 @@ async function handleTrigger(event) {
       return approvals.wait(threadTs, { allowlist, promptTs: prompt.ts });
     },
 
+    onNotify(event, detail) {
+      // Lifecycle pages. The approval prompt itself is posted by
+      // requestApproval; this adds the machine-readable marker and a nudge for
+      // the case where the operator is not watching the thread.
+      const text =
+        event === "input_required"
+          ? `🔔 *נדרשת פעולה שלך* — ההרצה ממתינה לאישור (${detail.awaiting}). ללא מענה היא תידחה אוטומטית.`
+          : detail.outcome === "success"
+            ? `🔔 ההרצה הסתיימה בהצלחה${detail.pr_url ? ` — ${detail.pr_url}` : ""}`
+            : `🔔 ההרצה הסתיימה בכישלון (קוד ${detail.exit_code})`;
+      say(text, threadTs).catch((err) => console.error(`[slack] notify post failed: ${err.message}`));
+    },
+
     async report(summary) {
       await say(
         [
@@ -233,6 +248,20 @@ app.message(async ({ message }) => {
   if (message.channel !== SLACK_NOTIFY_CHANNEL) return;
   if (message.bot_id || message.subtype) return;
   if (!message.thread_ts) return;
+
+  // Emergency stop takes precedence over approval parsing: a run that is already
+  // executing cannot be halted by denying a gate it has passed.
+  if (isKillCommand(message.text)) {
+    if (!isAllowed(message.user, allowlist)) {
+      logEvent({ kind: "kill-refused", user: message.user, thread_ts: message.thread_ts, reason: "not-allowlisted" });
+      return;
+    }
+    const result = killActiveRun();
+    logEvent({ kind: "kill", user: message.user, thread_ts: message.thread_ts, killed: result.killed, reason: result.reason });
+    await say(result.killed ? `🛑 ההרצה נעצרה — ${result.reason}` : `⚠️ לא נעצר: ${result.reason}`, message.thread_ts);
+    return;
+  }
+
   approvals.handleReply({ threadTs: message.thread_ts, user: message.user, text: message.text });
 });
 

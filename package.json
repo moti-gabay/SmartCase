@@ -18,7 +18,8 @@
     "db:studio": "prisma studio",
     "mcp:serve": "tsx scripts/mcp/server.ts",
     "slack-daemon": "node scripts/slack-daemon.js",
-    "autofix": "bash scripts/autofix/autofix.sh"
+    "autofix": "bash scripts/autofix/autofix.sh",
+    "autofix:kill": "node scripts/autofix/kill.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",

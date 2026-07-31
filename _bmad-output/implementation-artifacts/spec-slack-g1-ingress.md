@@ -55,6 +55,13 @@ context:
 | Missing optional scope | Token lacks `reactions:read` | Daemon starts, warns, disables ✅/❌ approval, says so in the prompt; reply approval unaffected | Warn only |
 | **Transport dies mid-session** | WebSocket drops (pong timeouts) while the process stays alive | Every transition logged to JSONL; exits non-zero after 3 consecutive failures so a supervisor restarts it | Exit 1 |
 | Transport recovers | Socket reconnects before the failure threshold | `connected` logged, failure counter reset, no restart | N/A |
+| Budget exhausted | A `claude` phase spends past `AUTOFIX_MAX_BUDGET_USD` | CLI aborts; reported as a budget ceiling naming the env var, not a bare crash | Exit 8 |
+| Kill from Slack | Allowlisted user replies `עצור` / `kill` in the thread | Active run's process group is terminated; outcome posted and audited | N/A |
+| Kill from a non-allowlisted user | Outsider replies `kill` | Ignored; audited as `kill-refused`; run continues | Silent |
+| Kill with no active run | `npm run autofix:kill` with no run in flight | Reports "no active run"; nothing signalled | Exit 0 |
+| Kill with a stale runfile | Recorded pid is not alive | Reports stale and clears the runfile rather than signalling a recycled pid | Exit 1 |
+| Run blocks on a human | Pipeline reaches the approval gate | `input_required` notification audited and posted to the thread | N/A |
+| Run reaches a terminal state | Success or failure | `agent_completed` notification audited and posted with outcome and exit code | N/A |
 
 </frozen-after-approval>
 
@@ -87,6 +94,8 @@ context:
   (a) The reinstalled app granted `reactions:write` (which lets a bot *add* reactions) rather than `reactions:read` (which delivers `reaction_added` events) — CLAUDE.md's scope table names the former, so following the docs produces exactly that grant. Hard-failing on it was wrong: reaction approval is one of two input paths and reply approval needs only `channels:history`. Split into `REQUIRED_SCOPES` and `OPTIONAL_SCOPES`; missing optional scopes warn and disable one capability each.
   (b) **The matrix had no row for the transport dying.** In testing the WebSocket died after 14 pong timeouts while the process stayed alive and the startup banner still read "listening" — both the operator and the agent believed it was healthy for ~30 minutes, and a real mention was lost because Socket Mode does not replay missed events. Added transport supervision: every transition audited to JSONL, non-zero exit after 3 consecutive failures. Exiting is correct here — a supervisor can restore a socket, but an externally-undetectable live-process-with-dead-socket cannot be recovered from.
   KEEP: fail-closed allowlist; silence (not a refusal message) for non-allowlisted triggers; timeout denies.
+
+- **2026-07-31 — execution guards, human-directed.** Added spend/kill/notification guards around the headless `claude` invocations. Two of the three requested CLI flags do not exist in the installed CLI (v2.1.220) and were substituted after checking `--help`: `--max-budget-usd` **does** exist (verified enforcing live — a $0.05 cap aborted with `Exceeded USD budget`); **`--max-turns` does not exist at all**, so budget serves as the runaway-loop bound alongside the existing per-phase timeouts; **`claude kill <id>` does not exist** — there is no such subcommand, only `claude agents` for listing. Kill is therefore implemented at the process level: children spawn `detached` so the pid is also a process-group id, the pid is published to `logs/autofix-active.json`, and killing the negated pid reaps grandchildren (verified end-to-end — a parent plus two descendants all reaped). Reachable via `npm run autofix:kill` and via `עצור`/`kill` as a threaded reply from an allowlisted user. `input_required` and `agent_completed` notifications are audited to JSONL and posted to the thread through a new `hooks.onNotify`. KEEP: kill and approval stay separate concerns — `deny` refuses a run that has not started, `kill` halts one already executing with permissions bypassed; conflating them would imply a denial can stop a running agent, which it cannot.
 
 ## Design Notes
 

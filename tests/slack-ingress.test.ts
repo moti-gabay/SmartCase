@@ -9,6 +9,7 @@ import {
   classifyReply,
   classifyReaction,
   shouldTrigger,
+  isKillCommand,
   missingScopes,
   missingOptionalScopes,
   REQUIRED_SCOPES,
@@ -92,6 +93,26 @@ test("classifyReply handles Hebrew, which an ASCII word boundary silently breaks
   // gate would wait out its timeout instead of approving.
   assert.equal(classifyReply("אישור"), "approve");
   assert.equal(classifyReply("דחייה"), "deny");
+});
+
+test("isKillCommand recognises emergency stops in Hebrew and English", () => {
+  for (const text of ["עצור", "הפסק", "kill", "stop", "STOP", "abort now", "  kill  "]) {
+    assert.equal(isKillCommand(text), true, text);
+  }
+});
+
+test("isKillCommand ignores chatter and approval words", () => {
+  // A kill must be unambiguous — it terminates an agent mid-execution.
+  for (const text of ["", "don't stop", "stop by later", "אישור", "deny", "kill the flaky test", null]) {
+    assert.equal(isKillCommand(text), false, JSON.stringify(text));
+  }
+});
+
+test("kill and approval decisions stay separate concerns", () => {
+  // deny refuses a run that has not started; kill halts one already executing
+  // with permissions bypassed. Neither may be read as the other.
+  assert.equal(classifyReply("kill"), null, "kill must not parse as an approval decision");
+  assert.equal(isKillCommand("deny"), false, "deny must not parse as a kill");
 });
 
 test("classifyReaction maps the usual approve/deny emoji", () => {

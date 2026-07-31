@@ -77,6 +77,39 @@ thread, never queued.
 the repo under `_bmad-output/autofix/<runId>/`. The thread gets status lines, the approval
 prompt, and the final summary.
 
+## Execution guards
+
+| Guard | Mechanism | Configure |
+|---|---|---|
+| Spend ceiling | `--max-budget-usd` on every `claude` invocation | `AUTOFIX_MAX_BUDGET_USD` (default `2.0`) |
+| Wall clock | Per-phase timeouts | 10 min plan · 5 min review · 30 min execute · 15 min verify |
+| Kill switch | `npm run autofix:kill`, or reply `עצור` / `kill` in the Slack thread | — |
+| Output cap | Child stdout capped, process group killed on overflow | 32 MB |
+
+**There is no `--max-turns` in this CLI** (checked against v2.1.220) — the budget ceiling
+plus per-phase timeouts are what bound a runaway loop. Likewise there is no
+`claude kill <id>` subcommand, so termination is done at the process level: phases spawn
+`claude` **detached**, so the child's pid is also its process-group id, and it is published
+to `logs/autofix-active.json`. Killing the negated pid reaps the tool subprocesses Claude
+spawns — signalling only the direct child can strand them holding the stdio pipes, after
+which `close` never fires and the timeout cannot help.
+
+Hitting the budget is reported as a budget ceiling naming the env var, not as a bare
+non-zero exit, because raising the limit is a decision rather than a bug.
+
+## Notifications
+
+`runPipeline` accepts `hooks.onNotify(event, detail)`. Every event is also written to
+`logs/autofix-events.jsonl` with `"kind":"notification"`, so the audit trail survives a
+transport that is down.
+
+| Event | Fired when | Carries |
+|---|---|---|
+| `input_required` | The run reaches the approval gate and is blocked on a human | `runId`, `branch`, `planPath`, `reviewPath`, `verdict` |
+| `agent_completed` | The run reaches a terminal state | `outcome`, `exit_code`, `pr_url` or `error` |
+
+A throwing or absent `onNotify` never takes down the run it is reporting on.
+
 ## Exit codes
 
 | Code | Meaning |
