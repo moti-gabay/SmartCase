@@ -78,15 +78,34 @@ it matches a generic best-practice checklist. Pre-existing gaps the plan merely 
 defects introduced by the plan; noting them is useful, failing the plan for them is not.
 
 Output Markdown: a short summary, then findings by severity (Critical / High / Medium / Low),
-each with the concern and a concrete correction. Then, as the FINAL line and nothing after it,
-output exactly one of:
+each with the concern and a concrete correction.
+
+WHAT COUNTS AS A FINDING. Only something you want CHANGED is a finding. If your correction would
+read "no correction needed", the plan already handles it — do not write it up at all. Observations,
+confirmations that the plan got something right, praise, and "worth noting in the PR description"
+remarks are not findings; leave them out or put them in the summary. Never file one of these as
+Critical or High.
+
+SEVERITY. Critical and High are reserved for defects that would make the shipped change WRONG:
+incorrect behaviour, a security or data-integrity hole, or work outside the stated scope. A better
+way to word something, a nicer test step, a refactor you would prefer, or a pre-existing gap the
+plan merely inherits — these are Medium at most, usually Low.
+
+Then, as the FINAL line and nothing after it, output exactly one of:
 
 VERDICT: PASS
 VERDICT: FAIL
 
-Use FAIL only if a Critical or High finding identifies something that would make the change
-incorrect, unsafe, or out of scope. A plan with no such findings is PASS. Do not invent findings,
-and do not omit the verdict line."""
+THE VERDICT RULE. Before writing it, ask yourself one question: "If an engineer implemented this
+plan exactly as written, would the result be incorrect, unsafe, or outside the requested scope?"
+
+- If NO — output VERDICT: PASS. This holds even when you have raised Medium and Low notes, and even
+  when you can think of improvements. PASS means "safe to build", not "flawless".
+- If YES — output VERDICT: FAIL, and make sure the Critical or High finding that justifies it names
+  the concrete failure: what breaks, or what unsafe or out-of-scope thing happens.
+
+Do not fail a plan because findings exist. Do not fail a plan for style, wording, or preference. Do
+not invent findings, and do not omit the verdict line."""
 
 SYSTEM_PROMPT = """You are a senior code reviewer performing an external, adversarial review of a git diff.
 
