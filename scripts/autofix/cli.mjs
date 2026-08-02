@@ -9,6 +9,7 @@ import { createReadStream } from "node:fs";
 import { stdin, stdout } from "node:process";
 
 import { runPipeline, AutofixError, EXIT } from "./pipeline.mjs";
+import { DEFAULT_MODEL_TIERS, MODEL_TIER_ENV } from "./guards.mjs";
 
 const USAGE = `Usage: npm run autofix -- [options] "<issue text>"
 
@@ -19,18 +20,36 @@ Options:
   --base-ref <ref>    Cut the fix branch from <ref> instead of the repository's
                       default branch. Use when the defect exists only on a
                       feature/PR branch — cutting from main would hide it.
+  --triage-model <id> Model for Phase 0 triage    (default: ${DEFAULT_MODEL_TIERS.triage})
+  --plan-model <id>   Model for Phase 1 planning  (default: ${DEFAULT_MODEL_TIERS.plan})
+  --exec-model <id>   Model for Phase 3 execution (default: ${DEFAULT_MODEL_TIERS.execute})
+  --skip-triage       Go straight to planning; skip the Phase 0 classification
   --yes               Skip the interactive approval prompt (DANGEROUS — this is
                       the only gate before 'claude --dangerously-skip-permissions')
   --no-pr             Stop after the tests pass; do not push or open a PR
-  --dry-run           Print the resolved binary, run id, and branch; change nothing
-  -h, --help          Show this message`;
+  --dry-run           Print the resolved binary, run id, branch, and models; change nothing
+  -h, --help          Show this message
+
+Each model tier also reads an environment variable, which the matching flag
+overrides: ${MODEL_TIER_ENV.triage}, ${MODEL_TIER_ENV.plan}, ${MODEL_TIER_ENV.execute}.
+
+Phase 2's plan review is not a Claude model — it runs an independent provider via
+--provider, deliberately, so the plan is audited by a different vendor than wrote it.`;
 
 const PROVIDERS = ["gemini", "openai", "deepseek"];
 
 function parseArgs(argv) {
-  const options = { provider: "gemini", yes: false, createPr: true, dryRun: false };
+  const options = { provider: "gemini", yes: false, createPr: true, dryRun: false, skipTriage: false, models: {} };
   const positional = [];
   let endOfFlags = false;
+
+  // Same swallow-the-next-flag trap as --provider: `--plan-model --yes` would
+  // otherwise silently consume the flag and pass "--yes" to `claude --model`.
+  const valueFor = (flag, next) => {
+    if (!next || next.startsWith("-")) throw new AutofixError(EXIT.BAD_INPUT, `${flag} needs a value`);
+    return next;
+  };
+  const MODEL_FLAGS = { "--triage-model": "triage", "--plan-model": "plan", "--exec-model": "execute" };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -57,7 +76,11 @@ function parseArgs(argv) {
       if (!value || value.startsWith("-")) throw new AutofixError(EXIT.BAD_INPUT, "--base-ref needs a value");
       options.baseRef = value;
       i += 1;
-    } else if (arg === "--yes") options.yes = true;
+    } else if (MODEL_FLAGS[arg]) {
+      options.models[MODEL_FLAGS[arg]] = valueFor(arg, argv[i + 1]);
+      i += 1;
+    } else if (arg === "--skip-triage") options.skipTriage = true;
+    else if (arg === "--yes") options.yes = true;
     else if (arg === "--no-pr") options.createPr = false;
     else if (arg === "--dry-run") options.dryRun = true;
     else if (arg === "-h" || arg === "--help") options.help = true;
@@ -165,6 +188,7 @@ async function main() {
       console.error(`   branch:  ${summary.branch}`);
       console.error(`   changed: ${summary.filesChanged} file(s)`);
       console.error(`   tests:   ${summary.testResults.join(", ")}`);
+      console.error(`   models:  triage=${summary.models.triage} plan=${summary.models.plan} exec=${summary.models.execute}`);
       console.error(`   cost:    $${summary.spentUsd} of $${summary.budgetUsd}`);
       console.error(`   PR:      ${summary.prUrl ?? "(skipped: --no-pr)"}`);
       console.error("=".repeat(72));
@@ -176,6 +200,8 @@ async function main() {
     createPr: options.createPr,
     dryRun: options.dryRun,
     baseRef: options.baseRef,
+    models: options.models,
+    skipTriage: options.skipTriage,
   });
   return EXIT.OK;
 }
