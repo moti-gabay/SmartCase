@@ -77,6 +77,160 @@ export function resolveClaudeBin(env = process.env, deps = {}) {
 }
 
 /**
+ * Validate the per-invocation spend ceiling.
+ *
+ * `Number(process.env.X ?? 2.0)` yields NaN for anything non-numeric, and NaN
+ * stringifies to "NaN" — which reaches the CLI as `--max-budget-usd NaN` and
+ * either aborts the phase or, worse, is ignored, silently removing the only
+ * spend guard. A typo in an env var must not disarm the ceiling, so anything
+ * that is not a finite positive number falls back to the default.
+ *
+ * @returns {{value: number, ok: boolean}} — ok is false when the raw value was rejected.
+ */
+export function parseBudgetUsd(raw, fallback = 2.0) {
+  if (raw === undefined || raw === null || String(raw).trim() === "") return { value: fallback, ok: true };
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return { value: fallback, ok: false };
+  return { value, ok: true };
+}
+
+/**
+ * Parse the envelope emitted by `claude --print --output-format json`.
+ *
+ * Verified against CLI v2.1.220. The envelope is a single JSON object carrying
+ * `result` (the assistant's text), `total_cost_usd`, `subtype`, and
+ * `terminal_reason`. Two properties of it drive the design here:
+ *
+ *   - A **failed** run still emits a full, valid envelope on stdout, with a real
+ *     `total_cost_usd`. Budget exhaustion exits 1 but has already spent money,
+ *     so the cost must be charged to the run ledger on the failure path too —
+ *     charging only on success would let a run exceed its ceiling by repeatedly
+ *     failing.
+ *   - `total_cost_usd` is the CLI's own accounting, including cache reads and
+ *     writes. Do not attempt to re-derive it from `usage` token counts.
+ *
+ * Fail-soft on shape: a missing or unparseable cost yields `costUsd: null`,
+ * which callers must treat as "unknown spend", never as zero.
+ *
+ * @returns {{ok: boolean, result: string, costUsd: number|null, subtype: string|null,
+ *            terminalReason: string|null, numTurns: number|null, errors: string[], parsed: boolean}}
+ */
+export function parseClaudeResult(stdout) {
+  const empty = {
+    ok: false,
+    result: "",
+    costUsd: null,
+    subtype: null,
+    terminalReason: null,
+    numTurns: null,
+    errors: [],
+    parsed: false,
+  };
+
+  const text = String(stdout ?? "").trim();
+  if (!text) return empty;
+
+  let envelope;
+  try {
+    envelope = JSON.parse(text);
+  } catch {
+    // Not JSON at all — a text-format phase, or output the CLI never framed.
+    // Surface the raw text so the caller can still use it, but flag it unparsed
+    // so no cost is silently assumed.
+    return { ...empty, result: text };
+  }
+  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
+    return { ...empty, result: text };
+  }
+
+  const rawCost = envelope.total_cost_usd;
+  const costUsd = typeof rawCost === "number" && Number.isFinite(rawCost) && rawCost >= 0 ? rawCost : null;
+
+  return {
+    // is_error is the CLI's own verdict; absent means "no error reported".
+    ok: envelope.is_error !== true,
+    result: typeof envelope.result === "string" ? envelope.result : "",
+    costUsd,
+    subtype: typeof envelope.subtype === "string" ? envelope.subtype : null,
+    terminalReason: typeof envelope.terminal_reason === "string" ? envelope.terminal_reason : null,
+    numTurns: typeof envelope.num_turns === "number" ? envelope.num_turns : null,
+    errors: Array.isArray(envelope.errors) ? envelope.errors.filter((e) => typeof e === "string") : [],
+    parsed: true,
+  };
+}
+
+/**
+ * Cumulative spend ledger for one autofix run.
+ *
+ * `--max-budget-usd` is a **per-invocation** ceiling: a run that reaches both the
+ * plan and execute phases can spend up to 2× the configured limit, and that is
+ * not what an operator setting a $2 budget expects. The ledger makes the limit
+ * mean what it says by tracking spend across phases and handing each subsequent
+ * invocation only the budget that is actually left.
+ *
+ * An unknown cost (`null`, i.e. an unparseable envelope) is deliberately charged
+ * as `unknownCharges` rather than zero. Treating unknown as free is the failure
+ * mode that lets a run quietly blow through its ceiling, so callers can refuse
+ * to continue once any spend is unaccounted for.
+ */
+export function createBudgetLedger(totalUsd, { minPhaseUsd = 0.1 } = {}) {
+  let spent = 0;
+  let unknownCharges = 0;
+  const phases = [];
+
+  return {
+    /**
+     * @param {number|null} costUsd Charge a phase. null means "spent an unknown amount".
+     * @param {string|null} [phase]
+     */
+    charge(costUsd, phase = null) {
+      if (typeof costUsd === "number" && Number.isFinite(costUsd) && costUsd >= 0) {
+        spent += costUsd;
+        phases.push({ phase, costUsd });
+      } else {
+        unknownCharges += 1;
+        phases.push({ phase, costUsd: null });
+      }
+      return this;
+    },
+    spent: () => Number(spent.toFixed(6)),
+    unknownCharges: () => unknownCharges,
+    phases: () => phases.slice(),
+    total: () => totalUsd,
+    /** Never negative: an overspend reports zero remaining, not a negative ceiling. */
+    remaining: () => Number(Math.max(0, totalUsd - spent).toFixed(6)),
+    /**
+     * Is there enough left to be worth launching another phase?
+     *
+     * Below the floor the invocation would abort mid-thought and still be
+     * billed, so refusing before spawning is both cheaper and clearer than
+     * letting the CLI hit its own ceiling.
+     *
+     * @param {string|null} [phase]
+     * @returns {{ok: boolean, remaining: number, reason: string|null}}
+     */
+    canAfford(phase = null) {
+      const remaining = Number(Math.max(0, totalUsd - spent).toFixed(6));
+      if (unknownCharges > 0) {
+        return {
+          ok: false,
+          remaining,
+          reason: `spend for ${unknownCharges} earlier phase(s) could not be accounted for`,
+        };
+      }
+      if (remaining < minPhaseUsd) {
+        return {
+          ok: false,
+          remaining,
+          reason: `only $${remaining} of the $${totalUsd} run budget remains${phase ? ` before ${phase}` : ""} (floor $${minPhaseUsd})`,
+        };
+      }
+      return { ok: true, remaining, reason: null };
+    },
+  };
+}
+
+/**
  * Extract a branch name from a symbolic ref.
  *
  * `git symbolic-ref refs/remotes/origin/HEAD` yields `refs/remotes/origin/main`;

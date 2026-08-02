@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, writeFileSync, rmSync } from "node:fs";
 
 // @ts-ignore -- plain ESM module, no type declarations
-import { explainClaudeFailure } from "../scripts/autofix/pipeline.mjs";
+import { explainClaudeFailure, RUNFILE, EXIT } from "../scripts/autofix/pipeline.mjs";
+// @ts-ignore -- plain ESM module, no type declarations
+import { killActiveRun } from "../scripts/autofix/kill.mjs";
 // @ts-ignore -- plain ESM module, no type declarations
 import {
   resolveClaudeBin,
@@ -14,6 +17,9 @@ import {
   parsePorcelainZ,
   neutralizeVerdictMarkers,
   parseDefaultBranchRef,
+  parseBudgetUsd,
+  parseClaudeResult,
+  createBudgetLedger,
 } from "../scripts/autofix/guards.mjs";
 
 const WINDOWS_SHIM = "/mnt/c/Users/yeder/AppData/Roaming/npm/claude";
@@ -293,4 +299,185 @@ test("parsePorcelainZ tolerates empty and malformed input", () => {
   assert.deepEqual(parsePorcelainZ(""), []);
   assert.deepEqual(parsePorcelainZ(null), []);
   assert.deepEqual(parsePorcelainZ("??\0"), []);
+});
+
+test("parseBudgetUsd falls back rather than disarming the ceiling", () => {
+  // A typo must not reach the CLI as `--max-budget-usd NaN`, which would either
+  // abort the phase or silently drop the only spend guard.
+  assert.deepEqual(parseBudgetUsd("abc"), { value: 2.0, ok: false });
+  assert.deepEqual(parseBudgetUsd("0"), { value: 2.0, ok: false });
+  assert.deepEqual(parseBudgetUsd("-5"), { value: 2.0, ok: false });
+  assert.deepEqual(parseBudgetUsd("Infinity"), { value: 2.0, ok: false });
+});
+
+test("parseBudgetUsd accepts a valid override and an absent value", () => {
+  assert.deepEqual(parseBudgetUsd("7.5"), { value: 7.5, ok: true });
+  assert.deepEqual(parseBudgetUsd(undefined), { value: 2.0, ok: true });
+  assert.deepEqual(parseBudgetUsd(""), { value: 2.0, ok: true });
+  assert.deepEqual(parseBudgetUsd("  "), { value: 2.0, ok: true });
+  assert.deepEqual(parseBudgetUsd(undefined, 5), { value: 5, ok: true });
+});
+
+test("killActiveRun refuses when the named run is not the active one", () => {
+  // The safety interlock: with no CLI session ids to address, an untargeted kill
+  // hits whatever is running now. Naming a run must never stop a bystander.
+  if (existsSync(RUNFILE)) return; // a real run is in flight — do not disturb it
+  writeFileSync(RUNFILE, JSON.stringify({ pid: process.pid, runId: "real-run", phase: "execute" }), "utf8");
+  try {
+    const result = killActiveRun("some-other-run");
+    assert.equal(result.killed, false);
+    assert.match(result.reason, /refusing to kill/);
+    // The refusal must not clear the runfile — the real run is still going.
+    assert.equal(existsSync(RUNFILE), true);
+  } finally {
+    rmSync(RUNFILE, { force: true });
+  }
+});
+
+test("killActiveRun reports no active run when there is no runfile", () => {
+  if (existsSync(RUNFILE)) return;
+  assert.deepEqual(killActiveRun(), { killed: false, reason: "no active run" });
+  assert.deepEqual(killActiveRun("anything"), { killed: false, reason: "no active run" });
+});
+
+// --- Cumulative budget accounting -----------------------------------------
+// Envelope fixtures are trimmed copies of real `claude --output-format json`
+// output from CLI v2.1.220 — including the failure shape, which still carries a
+// real cost.
+
+const SUCCESS_ENVELOPE = JSON.stringify({
+  is_error: false,
+  num_turns: 1,
+  total_cost_usd: 0.046109,
+  subtype: "success",
+  terminal_reason: "completed",
+  result: "the plan text",
+  type: "result",
+});
+
+const BUDGET_ENVELOPE = JSON.stringify({
+  is_error: true,
+  num_turns: 1,
+  total_cost_usd: 0.000581,
+  terminal_reason: "budget_exhausted",
+  subtype: "error_max_budget_usd",
+  errors: ["Reached maximum budget ($0.0001)"],
+  type: "result",
+});
+
+test("parseClaudeResult reads cost and result from a success envelope", () => {
+  const parsed = parseClaudeResult(SUCCESS_ENVELOPE);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.parsed, true);
+  assert.equal(parsed.result, "the plan text");
+  assert.equal(parsed.costUsd, 0.046109);
+  assert.equal(parsed.terminalReason, "completed");
+});
+
+test("parseClaudeResult still reports cost for a failed run", () => {
+  // The decisive property: a budget-exhausted phase exits 1 but has spent real
+  // money. Ignoring cost on the failure path would let a run exceed its ceiling
+  // by failing repeatedly.
+  const parsed = parseClaudeResult(BUDGET_ENVELOPE);
+  assert.equal(parsed.ok, false);
+  assert.equal(parsed.costUsd, 0.000581);
+  assert.equal(parsed.subtype, "error_max_budget_usd");
+  assert.equal(parsed.terminalReason, "budget_exhausted");
+});
+
+test("parseClaudeResult reports unknown cost rather than zero for non-JSON", () => {
+  // null means "unaccounted", which the ledger refuses to treat as free.
+  for (const raw of ["not json at all", "", null, "[1,2,3]"]) {
+    assert.equal(parseClaudeResult(raw).costUsd, null);
+    assert.equal(parseClaudeResult(raw).parsed, false);
+  }
+  assert.equal(parseClaudeResult("plain text").result, "plain text");
+});
+
+test("parseClaudeResult rejects a malformed cost instead of trusting it", () => {
+  const bad = JSON.stringify({ total_cost_usd: "1.50", result: "x" });
+  assert.equal(parseClaudeResult(bad).costUsd, null);
+  const negative = JSON.stringify({ total_cost_usd: -3, result: "x" });
+  assert.equal(parseClaudeResult(negative).costUsd, null);
+});
+
+test("ledger accumulates spend across phases and shrinks the remaining ceiling", () => {
+  // The whole point: --max-budget-usd is per invocation, so without the ledger a
+  // two-phase run could spend 2x the configured ceiling.
+  const ledger = createBudgetLedger(2.0);
+  assert.equal(ledger.remaining(), 2.0);
+
+  ledger.charge(0.8, "plan");
+  assert.equal(ledger.spent(), 0.8);
+  assert.equal(ledger.remaining(), 1.2);
+  assert.equal(ledger.canAfford("execute").ok, true);
+  assert.equal(ledger.canAfford("execute").remaining, 1.2);
+
+  ledger.charge(1.15, "execute");
+  assert.equal(ledger.spent(), 1.95);
+  assert.equal(ledger.remaining(), 0.05);
+});
+
+test("ledger refuses a phase once the remaining budget falls below the floor", () => {
+  const ledger = createBudgetLedger(2.0, { minPhaseUsd: 0.1 });
+  ledger.charge(1.95, "plan");
+  const check = ledger.canAfford("execute");
+  assert.equal(check.ok, false);
+  assert.equal(check.remaining, 0.05);
+  assert.match(check.reason!, /remains before execute/);
+});
+
+test("ledger never reports a negative remaining ceiling", () => {
+  // A negative would be passed to --max-budget-usd and rejected by the CLI.
+  const ledger = createBudgetLedger(1.0);
+  ledger.charge(3.5, "execute");
+  assert.equal(ledger.remaining(), 0);
+  assert.equal(ledger.canAfford("next").ok, false);
+});
+
+test("ledger treats an unaccounted phase as blocking, not as free", () => {
+  // The failure mode this guards: if an unknown cost counted as $0, a run whose
+  // metering broke would keep launching phases on a balance nobody knows.
+  const ledger = createBudgetLedger(2.0);
+  ledger.charge(null, "plan");
+  assert.equal(ledger.unknownCharges(), 1);
+  assert.equal(ledger.spent(), 0);
+  const check = ledger.canAfford("execute");
+  assert.equal(check.ok, false);
+  assert.match(check.reason!, /could not be accounted for/);
+});
+
+test("ledger records the per-phase breakdown", () => {
+  const ledger = createBudgetLedger(5);
+  ledger.charge(0.25, "plan").charge(1.5, "execute");
+  assert.deepEqual(ledger.phases(), [
+    { phase: "plan", costUsd: 0.25 },
+    { phase: "execute", costUsd: 1.5 },
+  ]);
+  assert.equal(ledger.total(), 5);
+});
+
+test("ledger avoids floating-point drift in accumulated spend", () => {
+  // 0.1 + 0.2 === 0.30000000000000004; an unrounded total would surface in both
+  // the operator report and the --max-budget-usd argument.
+  const ledger = createBudgetLedger(1.0);
+  ledger.charge(0.1, "a").charge(0.2, "b");
+  assert.equal(ledger.spent(), 0.3);
+  assert.equal(ledger.remaining(), 0.7);
+});
+
+test("explainClaudeFailure recognises budget exhaustion from the JSON envelope", () => {
+  // Regression: the previous probe looked for "Exceeded USD budget", which the
+  // CLI never emits (it says "Reached maximum budget"), so every budget stop was
+  // reported as an unexplained non-zero exit.
+  const err = explainClaudeFailure(1, BUDGET_ENVELOPE, "", 0.5);
+  assert.equal(err.code, EXIT.BUDGET_EXHAUSTED);
+  assert.match(err.message, /budget ceiling/);
+  assert.match(err.message, /0\.0006/);
+});
+
+test("explainClaudeFailure still names non-budget failures", () => {
+  const err = explainClaudeFailure(1, "", "API Error: 401 authentication_error");
+  assert.equal(err.code, EXIT.CLAUDE_FAILED);
+  assert.match(err.message, /rejected the credentials/);
 });

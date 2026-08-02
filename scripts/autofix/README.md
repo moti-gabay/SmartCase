@@ -73,6 +73,10 @@ not consent. No answer within 30 minutes denies the run.
 **Concurrency.** One run per daemon process. A trigger arriving mid-run is refused in its
 thread, never queued.
 
+**Stopping a run.** Reply `עצור` / `kill` in the thread that started it. Only allowlisted
+users can stop a run, and only from the owning thread — see "Execution guards" below for
+why the address is a `runId` rather than a session id.
+
 **What is not posted to Slack:** plan bodies, review text, and raw `claude` output stay in
 the repo under `_bmad-output/autofix/<runId>/`. The thread gets status lines, the approval
 prompt, and the final summary.
@@ -81,21 +85,84 @@ prompt, and the final summary.
 
 | Guard | Mechanism | Configure |
 |---|---|---|
-| Spend ceiling | `--max-budget-usd` on every `claude` invocation | `AUTOFIX_MAX_BUDGET_USD` (default `2.0`) |
+| Spend ceiling | Cumulative **per-run** ledger; each phase is launched with the budget that is left | `AUTOFIX_MAX_BUDGET_USD` (default `2.0`) |
 | Wall clock | Per-phase timeouts | 10 min plan · 5 min review · 30 min execute · 15 min verify |
-| Kill switch | `npm run autofix:kill`, or reply `עצור` / `kill` in the Slack thread | — |
+| Kill switch | `npm run autofix:kill [-- <runId>]`, or reply `עצור` / `kill` in the Slack thread | — |
 | Output cap | Child stdout capped, process group killed on overflow | 32 MB |
 
-**There is no `--max-turns` in this CLI** (checked against v2.1.220) — the budget ceiling
-plus per-phase timeouts are what bound a runaway loop. Likewise there is no
-`claude kill <id>` subcommand, so termination is done at the process level: phases spawn
-`claude` **detached**, so the child's pid is also its process-group id, and it is published
-to `logs/autofix-active.json`. Killing the negated pid reaps the tool subprocesses Claude
+The spend ceiling lives in a single `claudeBaseArgs()` helper rather than at each call
+site, so a phase cannot be added without it. An `AUTOFIX_MAX_BUDGET_USD` that is not a
+finite positive number is rejected with a warning and the default is used — `Number("abc")`
+is `NaN`, which stringifies to `NaN` and would reach the CLI as `--max-budget-usd NaN`,
+disarming the only spend guard because of a typo.
+
+### `AUTOFIX_MAX_BUDGET_USD` is a per-run ceiling, not a per-phase one
+
+`--max-budget-usd` is a **per-invocation** limit. Taken at face value, a run reaching both
+the plan and the execute phase could spend 2× the configured amount — not what "$2" means
+to whoever set it. So the pipeline keeps a ledger for the whole run:
+
+1. Every `claude` invocation runs with `--output-format json`, which is the only way to
+   read `total_cost_usd`. This is mandatory, not a per-phase choice: a phase that reverted
+   to text output would go unaccounted for and silently uncap the run.
+2. After each phase the actual cost is charged to the ledger and written to
+   `logs/autofix-events.jsonl` as `status:"cost"` with `run_spent_usd` / `run_remaining_usd`.
+3. The next phase is launched with `--max-budget-usd <remaining>`, so the run-level number
+   is the one that actually binds.
+4. If the remaining balance is below the `$0.10` floor, the phase is **not launched**. The
+   run aborts with exit `9` and a `budget_exhausted` notification, before spawning
+   `claude -p`. Aborting after the CLI hits its own ceiling would mean paying for a phase
+   that produced nothing usable.
+
+Affordability for the execute phase is also checked *before* the approval prompt. Nothing
+spends in between, but asking a human to approve a run that will immediately abort on
+budget wastes the one step that requires a person.
+
+Two failure modes this handles that a naive implementation does not:
+
+- **A failed phase still costs money.** A budget-exhausted invocation exits 1 and *still
+  emits a complete JSON envelope with a real `total_cost_usd`*. Cost is therefore charged
+  on the failure path too — a ledger that only counted successes could be walked past its
+  ceiling by a phase that keeps failing.
+- **Unknown cost is not zero.** If an envelope is missing or unparseable, the phase is
+  recorded as an *unaccounted* charge rather than as free, and the run refuses to launch
+  anything further. Treating unknown as $0 is precisely how a run quietly blows its limit.
+
+Hitting the budget is reported as a budget ceiling naming the env var, not as a bare
+non-zero exit, because raising the limit is a decision rather than a bug. That detection
+reads the envelope's `subtype` / `terminal_reason` fields rather than matching prose —
+the previous text probe looked for `Exceeded USD budget`, which this CLI never emits (its
+actual wording is `Reached maximum budget ($X)`), so every budget stop had been surfacing
+as an unexplained non-zero exit.
+
+### Two CLI features this pipeline deliberately does not use
+
+**`--max-turns` does not exist in this CLI** (re-verified against v2.1.220 — it appears
+nowhere in `claude --help`). Passing an unknown option aborts the phase before any work
+happens, so adding it would break all four phases rather than bound them. The budget
+ceiling plus the per-phase timeouts are what bound a runaway loop. If a future version
+adds the flag, put it in `CLAUDE_BASE_ARGS` alongside `--max-budget-usd`.
+
+**`claude kill <id>` does not exist either.** There *is* a hidden `claude stop <id>`, but
+it addresses **background agent sessions** — those started with `--bg` and listed by
+`claude agents --json`. Every phase here runs as a foreground `claude --print` child and
+has no such session id, so `claude stop` has nothing to address. Termination is done at
+the process level instead: phases spawn `claude` **detached**, so the child's pid is also
+its process-group id, and the pid, phase, and `runId` are published to
+`logs/autofix-active.json`. Killing the negated pid reaps the tool subprocesses Claude
 spawns — signalling only the direct child can strand them holding the stdio pipes, after
 which `close` never fires and the timeout cannot help.
 
-Hitting the budget is reported as a budget ceiling naming the env var, not as a bare
-non-zero exit, because raising the limit is a decision rather than a bug.
+Because there are no session ids, `autofix:kill` takes the **`runId`** as its optional
+address, and it is an interlock rather than a selector: there is only ever one active run,
+so naming one that does not match makes the kill **refuse** instead of stopping a
+bystander. The Slack `עצור` path applies the same rule per-thread — a stop typed into an
+old thread will not reach a run that started since.
+
+```bash
+npm run autofix:kill                        # stop whatever is active
+npm run autofix:kill -- tag-filter-1a2b3c   # stop it only if it is this run
+```
 
 ## Notifications
 
@@ -105,10 +172,39 @@ transport that is down.
 
 | Event | Fired when | Carries |
 |---|---|---|
-| `input_required` | The run reaches the approval gate and is blocked on a human | `runId`, `branch`, `planPath`, `reviewPath`, `verdict` |
-| `agent_completed` | The run reaches a terminal state | `outcome`, `exit_code`, `pr_url` or `error` |
+| `input_required` | The run reaches the approval gate and is blocked on a human | `runId`, `branch`, `planPath`, `reviewPath`, `verdict`, `awaiting` |
+| `budget_exhausted` | The remaining run budget cannot cover the next phase — fired **before** `claude -p` is spawned | `runId`, `phase`, `spent_usd`, `remaining_usd`, `budget_usd`, `reason` |
+| `agent_completed` | The run reaches a terminal state | `runId`, `branch`, `outcome`, `exit_code`, `spent_usd`, `pr_url` or `error` |
 
 A throwing or absent `onNotify` never takes down the run it is reporting on.
+
+**Both sinks, always.** Under the Slack daemon each event lands in *two* ledgers, and
+neither is derived from the other:
+
+| Sink | Written by | Purpose |
+|---|---|---|
+| `logs/autofix-events.jsonl` | `runPipeline` | What the pipeline did, transport-agnostic |
+| `logs/slack-events.jsonl` | `daemon.mjs` `onNotify` | What an operator was actually paged about |
+| Slack thread message | `daemon.mjs` `onNotify` | The page itself |
+
+The daemon writes its JSONL line **before** the Slack post and independently of whether
+that post succeeds. Logging after a failed `chat.postMessage` would lose precisely the
+events that matter most — the ones where nobody was reachable.
+
+### G1 notification I/O matrix
+
+| Event | Trigger point (pipeline) | `autofix-events.jsonl` | `slack-events.jsonl` | Slack thread |
+|---|---|---|---|---|
+| `input_required` | Phase 2 passed, before `requestApproval` | `kind:"notification"` | `kind:"notification"`, `event`, `run_id`, `awaiting` | 🔔 awaiting-approval nudge |
+| `budget_exhausted` | Before spawning any phase whose cost the run cannot cover | `kind:"notification"`, `spent_usd` | `kind:"notification"`, `phase`, `spent_usd`, `remaining_usd` | 💸 budget spent, no agent launched |
+| — (per-phase cost) | After every `claude` invocation | `status:"cost"`, `phase_cost_usd`, `run_spent_usd`, `run_remaining_usd` | — | — |
+| `agent_completed` (success) | After the PR step | `kind:"notification"`, `pr_url` | `kind:"notification"`, `outcome:"success"`, `pr_url` | 🔔 done + PR link |
+| `agent_completed` (failure) | Pipeline `catch` | `kind:"notification"`, `error` | `kind:"notification"`, `outcome:"failed"`, `exit_code` | 🔔 failed + exit code |
+| kill | `עצור` / `kill` reply | — (process-level) | `kind:"kill"`, `run_id`, `killed`, `reason` | 🛑 / ⚠️ result |
+| kill refused | Reply from a foreign thread or non-allowlisted user | — | `kind:"kill-refused"`, `reason` | ⚠️ (allowlisted users only) |
+
+The daemon also stamps `runId` onto its active-run record from the first notification that
+carries one, which is what lets the thread-scoped kill address a specific run.
 
 ## Exit codes
 
@@ -122,7 +218,8 @@ A throwing or absent `onNotify` never takes down the run it is reporting on.
 | 5 | Unsafe repo state (dirty tree, detached HEAD, on `main`/`master`, or branch exists) |
 | 6 | Execution touched a forbidden path |
 | 7 | No usable Claude binary |
-| 8 | The Claude CLI itself failed (non-zero exit, timeout, killed, or output cap) |
+| 8 | The Claude CLI itself failed (non-zero exit, timeout, killed, output cap, or a missing JSON envelope) |
+| 9 | The run budget was exhausted — either a phase hit its ceiling, or too little remained to launch the next one |
 
 ## Security model
 

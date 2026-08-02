@@ -22,6 +22,9 @@ import {
   parsePorcelainZ,
   neutralizeVerdictMarkers,
   parseDefaultBranchRef,
+  parseBudgetUsd,
+  parseClaudeResult,
+  createBudgetLedger,
 } from "./guards.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -36,6 +39,7 @@ export const EXIT = {
   FORBIDDEN_PATHS: 6,
   NO_CLAUDE_BIN: 7,
   CLAUDE_FAILED: 8,
+  BUDGET_EXHAUSTED: 9,
 };
 
 /** Cap on a single child's stdout — a runaway transcript must not OOM the host. */
@@ -45,11 +49,48 @@ const MAX_CHILD_OUTPUT = 32 * 1024 * 1024;
  * Hard spend ceiling per `claude` invocation.
  *
  * `--max-budget-usd` is the CLI's own guard and only works with `--print`, which
- * is how every phase runs. Note the CLI has no `--max-turns`: budget is the
- * available bound on a runaway loop, so it does double duty as cost control and
- * loop control. Per-phase timeouts cover the wall-clock case.
+ * is how every phase runs.
+ *
+ * There is deliberately no `--max-turns` here: the flag does not exist in this
+ * CLI (re-verified against v2.1.220 — `claude --help` has no such option), and
+ * passing an unknown option aborts the phase before any work happens. Budget
+ * therefore does double duty as cost control and loop control, with the
+ * per-phase timeouts covering the wall-clock case. If a future CLI version adds
+ * it, add it to claudeBaseArgs() below rather than to each call site.
  */
-const MAX_BUDGET_USD = Number(process.env.AUTOFIX_MAX_BUDGET_USD ?? 2.0);
+const { value: MAX_BUDGET_USD, ok: BUDGET_OK } = parseBudgetUsd(process.env.AUTOFIX_MAX_BUDGET_USD);
+if (!BUDGET_OK) {
+  console.error(
+    `[autofix] ignoring invalid AUTOFIX_MAX_BUDGET_USD=${JSON.stringify(process.env.AUTOFIX_MAX_BUDGET_USD)} — using $${MAX_BUDGET_USD}`
+  );
+}
+
+/**
+ * Smallest remaining budget worth launching a phase with. Below this the
+ * invocation aborts partway and is billed anyway, so refusing up front is both
+ * cheaper and easier to explain than letting the CLI hit its own ceiling.
+ */
+const MIN_PHASE_BUDGET_USD = 0.1;
+
+/**
+ * Flags applied to every `claude` invocation, so a phase cannot be added without
+ * the spend ceiling or the JSON envelope the cost accounting depends on.
+ *
+ * `--max-budget-usd` is passed the budget **remaining for the run**, not the
+ * configured total — see the ledger in guards.mjs. `--output-format json` is
+ * mandatory here rather than a per-phase choice: it is the only way to read
+ * `total_cost_usd`, and a phase that quietly reverted to text output would go
+ * unaccounted for and silently uncap the run.
+ *
+ * @param {number} remainingUsd
+ */
+const claudeBaseArgs = (remainingUsd) => [
+  "--print",
+  "--output-format",
+  "json",
+  "--max-budget-usd",
+  String(remainingUsd),
+];
 
 const TIMEOUTS = {
   version: 30_000,
@@ -134,11 +175,24 @@ function clearRunfile() {
 export function explainClaudeFailure(code, stdout, stderr, budgetUsd = MAX_BUDGET_USD) {
   const combined = `${stderr ?? ""}\n${stdout ?? ""}`;
 
-  if (/Exceeded USD budget/i.test(combined)) {
+  // Budget exhaustion is detected from the JSON envelope's own fields, not from
+  // prose. The previous text probe (/Exceeded USD budget/i) never matched: the
+  // CLI's actual wording is "Reached maximum budget ($X)", so every budget stop
+  // was being reported as an unexplained non-zero exit. Structured fields do not
+  // drift between CLI releases the way a message string does — the prose match
+  // is kept only as a last-resort fallback.
+  const envelope = parseClaudeResult(stdout);
+  const hitBudget =
+    envelope.subtype === "error_max_budget_usd" ||
+    envelope.terminalReason === "budget_exhausted" ||
+    /Reached maximum budget|Exceeded USD budget/i.test(combined);
+
+  if (hitBudget) {
+    const spent = envelope.costUsd !== null ? ` after spending $${envelope.costUsd.toFixed(4)}` : "";
     return new AutofixError(
-      EXIT.CLAUDE_FAILED,
-      `claude hit the $${budgetUsd} budget ceiling`,
-      "Raise AUTOFIX_MAX_BUDGET_USD if this issue genuinely needs a longer run."
+      EXIT.BUDGET_EXHAUSTED,
+      `claude hit the $${budgetUsd} budget ceiling${spent}`,
+      "This is the per-phase share of the run budget that was left when the phase started.\nRaise AUTOFIX_MAX_BUDGET_USD if this issue genuinely needs a longer run."
     );
   }
 
@@ -173,6 +227,19 @@ export function explainClaudeFailure(code, stdout, stderr, budgetUsd = MAX_BUDGE
   return new AutofixError(EXIT.CLAUDE_FAILED, `claude exited ${code}`, meaningful || tail(stderr));
 }
 
+/**
+ * The ceiling actually handed to this invocation, read back from its own argv.
+ *
+ * The per-phase ceiling is the run's *remaining* budget, not MAX_BUDGET_USD, so
+ * a failure report that quoted the configured total would name a number the
+ * operator never sees enforced.
+ */
+function budgetOf(args) {
+  const index = (args ?? []).indexOf("--max-budget-usd");
+  const value = index >= 0 ? Number(args[index + 1]) : NaN;
+  return Number.isFinite(value) ? value : MAX_BUDGET_USD;
+}
+
 /** Last N lines — keeps failure reports useful without dumping a whole transcript. */
 function tail(text, lines = 30) {
   return String(text ?? "").trimEnd().split("\n").slice(-lines).join("\n");
@@ -187,6 +254,16 @@ async function git(args, cwd = REPO_ROOT) {
  * Run the Claude CLI with the prompt on stdin. Using stdin rather than argv
  * keeps untrusted issue text out of the process arguments entirely and sidesteps
  * ARG_MAX for long issue reports.
+ *
+ * Resolves the assistant's text (the envelope's `result`), having first charged
+ * the invocation's cost to `context.charge`. The charge happens on **every**
+ * terminal path, including failures: a phase that exits non-zero has already
+ * spent real money, and a ledger that only counted successes would let a run
+ * exceed its ceiling by failing repeatedly. A timeout or an overflow kill leaves
+ * no envelope to read, so those charge `null` — unknown spend, which the ledger
+ * refuses to treat as free.
+ *
+ * @param {{phase?: string, runId?: string, charge?: (costUsd: number|null, phase: string|null) => void}} context
  */
 function runClaude(bin, args, prompt, timeoutMs, context = {}) {
   return new Promise((resolve, reject) => {
@@ -236,16 +313,42 @@ function runClaude(bin, args, prompt, timeoutMs, context = {}) {
     child.on("close", (code, signal) => {
       clearTimeout(timer);
       clearRunfile();
+
+      const phase = context.phase ?? null;
+      const charge = context.charge ?? (() => {});
+      // Parse once, before branching: even a killed or failed run may have left
+      // a complete envelope on stdout, and its cost is real either way.
+      const envelope = parseClaudeResult(stdout);
+
       if (overflowed) {
+        charge(envelope.costUsd, phase);
         reject(new AutofixError(EXIT.CLAUDE_FAILED, `claude output exceeded ${MAX_CHILD_OUTPUT} bytes`, tail(stderr)));
       } else if (timedOut) {
+        // No usable envelope after a kill mid-stream: the spend is real but
+        // unknowable, so record it as unaccounted rather than as zero.
+        charge(envelope.parsed ? envelope.costUsd : null, phase);
         reject(new AutofixError(EXIT.CLAUDE_FAILED, `claude timed out after ${timeoutMs / 1000}s`, tail(stderr)));
       } else if (signal) {
+        charge(envelope.parsed ? envelope.costUsd : null, phase);
         reject(new AutofixError(EXIT.CLAUDE_FAILED, `claude killed by ${signal}`, tail(stderr)));
       } else if (code !== 0) {
-        reject(explainClaudeFailure(code, stdout, stderr));
+        charge(envelope.costUsd, phase);
+        reject(explainClaudeFailure(code, stdout, stderr, budgetOf(args)));
+      } else if (!envelope.parsed) {
+        // Exit 0 but no JSON envelope: the phase ran unmetered. Refuse rather
+        // than continue on an unknown balance — this is the one case where
+        // carrying on would silently uncap the run budget.
+        charge(null, phase);
+        reject(
+          new AutofixError(
+            EXIT.CLAUDE_FAILED,
+            "claude returned no JSON envelope — cost could not be accounted for",
+            "Expected --output-format json. Refusing to continue on an unknown budget balance."
+          )
+        );
       } else {
-        resolve(stdout);
+        charge(envelope.costUsd, phase);
+        resolve(envelope.result);
       }
     });
 
@@ -393,6 +496,19 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
 
   const log = (status, phase, extra = {}) => logEvent({ runId, branch, phase, status, ...extra });
 
+  // One ledger for the whole run. --max-budget-usd is per invocation, so without
+  // this a run reaching both plan and execute could spend 2× the configured
+  // ceiling — not what "my budget is $2" means to the operator who set it.
+  const budget = createBudgetLedger(MAX_BUDGET_USD, { minPhaseUsd: MIN_PHASE_BUDGET_USD });
+  const charge = (costUsd, phase) => {
+    budget.charge(costUsd, phase);
+    log("cost", phase ?? "claude", {
+      phase_cost_usd: costUsd,
+      run_spent_usd: budget.spent(),
+      run_remaining_usd: budget.remaining(),
+    });
+  };
+
   /**
    * Lifecycle notification. Always audited to JSONL; additionally handed to
    * hooks.onNotify so a transport (Slack) can page someone. A throwing or
@@ -405,6 +521,36 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
     } catch (err) {
       console.error(`[autofix] onNotify(${event}) failed: ${err.message}`);
     }
+  };
+
+  /**
+   * Refuse to launch a phase the run can no longer pay for.
+   *
+   * Checked *before* spawning, not after: aborting once the CLI has hit its own
+   * ceiling means paying for a phase that produced nothing usable. Returns the
+   * per-phase ceiling to hand the invocation — the remaining balance, so the
+   * run-level limit is what actually binds.
+   */
+  const affordPhase = (phase) => {
+    const check = budget.canAfford(phase);
+    if (!check.ok) {
+      log("failed", phase, { exit_code: EXIT.BUDGET_EXHAUSTED, run_spent_usd: budget.spent(), reason: check.reason });
+      notify("budget_exhausted", {
+        runId,
+        branch,
+        phase,
+        spent_usd: budget.spent(),
+        remaining_usd: check.remaining,
+        budget_usd: MAX_BUDGET_USD,
+        reason: check.reason,
+      });
+      throw new AutofixError(
+        EXIT.BUDGET_EXHAUSTED,
+        `run budget exhausted before ${phase}`,
+        `${check.reason}\nSpent $${budget.spent()} of $${MAX_BUDGET_USD}. Raise AUTOFIX_MAX_BUDGET_USD to allow a longer run.`
+      );
+    }
+    return check.remaining;
   };
 
   onPhase(0, "preflight", "resolving claude binary");
@@ -434,21 +580,10 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
     onPhase(1, "plan", "analyzing the issue (read-only)");
     const plan = await runClaude(
       claude.path,
-      [
-        "--print",
-        "--permission-mode",
-        "plan",
-        "--output-format",
-        "text",
-        "--max-budget-usd",
-        String(MAX_BUDGET_USD),
-        "--disallowedTools",
-        "Write",
-        "Edit",
-      ],
+      [...claudeBaseArgs(affordPhase("plan")), "--permission-mode", "plan", "--disallowedTools", "Write", "Edit"],
       PLAN_PROMPT(issue),
       TIMEOUTS.plan,
-      { phase: "plan", runId }
+      { phase: "plan", runId, charge }
     );
     if (!plan.trim()) {
       throw new AutofixError(EXIT.CLAUDE_FAILED, "planning produced no output", "claude returned an empty plan");
@@ -489,6 +624,11 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
     }
 
     // ---- Human gate ------------------------------------------------------
+    // Check affordability before the prompt, not just before the spawn. Nothing
+    // spends in between, but asking someone to approve a run that will abort on
+    // budget the moment they say yes wastes the one step that needs a human.
+    affordPhase("execute");
+
     onPhase(3, "approval", "waiting for human approval");
     // input_required: the run is now blocked on a human and will sit here until
     // the timeout. Emitting it as its own event means an operator can be paged
@@ -516,10 +656,10 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
 
     await runClaude(
       claude.path,
-      ["--print", "--dangerously-skip-permissions", "--max-budget-usd", String(MAX_BUDGET_USD)],
+      [...claudeBaseArgs(affordPhase("execute")), "--dangerously-skip-permissions"],
       EXECUTE_PROMPT(plan),
       TIMEOUTS.execute,
-      { phase: "execute", runId }
+      { phase: "execute", runId, charge }
     );
 
     const changed = await changedPaths();
@@ -596,15 +736,45 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
       log("ok", "pr", { pr_url: prUrl });
     }
 
-    const summary = { runId, branch, baseBranch, prUrl, verdict, testResults, planPath, reviewPath, filesChanged: changed.length };
+    const summary = {
+      runId,
+      branch,
+      baseBranch,
+      prUrl,
+      verdict,
+      testResults,
+      planPath,
+      reviewPath,
+      filesChanged: changed.length,
+      spentUsd: budget.spent(),
+      budgetUsd: MAX_BUDGET_USD,
+    };
     await report(summary);
-    notify("agent_completed", { runId, branch, outcome: "success", exit_code: EXIT.OK, pr_url: prUrl });
-    log("success", "done", { exit_code: EXIT.OK, pr_url: prUrl });
+    notify("agent_completed", {
+      runId,
+      branch,
+      outcome: "success",
+      exit_code: EXIT.OK,
+      pr_url: prUrl,
+      spent_usd: budget.spent(),
+    });
+    log("success", "done", { exit_code: EXIT.OK, pr_url: prUrl, run_spent_usd: budget.spent() });
     return summary;
   } catch (err) {
     const code = err instanceof AutofixError ? err.code : 1;
-    log("failed", err instanceof AutofixError ? "pipeline" : "unexpected", { exit_code: code, error: err.message });
-    notify("agent_completed", { runId, branch, outcome: "failed", exit_code: code, error: err.message });
+    log("failed", err instanceof AutofixError ? "pipeline" : "unexpected", {
+      exit_code: code,
+      error: err.message,
+      run_spent_usd: budget.spent(),
+    });
+    notify("agent_completed", {
+      runId,
+      branch,
+      outcome: "failed",
+      exit_code: code,
+      error: err.message,
+      spent_usd: budget.spent(),
+    });
     throw err;
   } finally {
     clearRunfile();
