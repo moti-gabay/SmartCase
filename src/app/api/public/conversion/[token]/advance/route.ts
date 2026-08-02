@@ -26,6 +26,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ token:
             communityName: true,
             sponsoringRabbi: true,
             personalStory: true,
+            storyAudioKey: true,
             _count: { select: { references: true } },
           },
         },

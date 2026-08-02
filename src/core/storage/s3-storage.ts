@@ -18,6 +18,19 @@ const EMPTY_SHA256 = crypto.createHash("sha256").update("").digest("hex");
 export const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10 MB
 export const ALLOWED_MIME = ["application/pdf", "image/png", "image/jpeg", "image/jpg"] as const;
 
+// Personal-story voice recordings (Phase 5). Separate limit + allowlist from the
+// document pipeline: audio is legitimately larger and none of the document MIME
+// types are valid here. MediaRecorder emits audio/webm on Chromium/Firefox and
+// audio/mp4 on Safari; the rest cover file-picker fallbacks.
+export const MAX_AUDIO_SIZE = 25 * 1024 * 1024; // 25 MB (~25 min of Opus)
+export const ALLOWED_AUDIO_MIME = [
+  "audio/webm",
+  "audio/ogg",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/wav",
+] as const;
+
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID ?? "";
 export const R2_BUCKET = process.env.R2_BUCKET ?? "";
 const R2_HOST = `${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
@@ -69,6 +82,25 @@ export function sanitizeFileName(name: string): string {
 
 export function buildStorageKey(caseId: string, documentId: string, fileName: string): string {
   return `cases/${caseId}/${documentId}/${sanitizeFileName(fileName)}`;
+}
+
+// Story audio lives outside the per-document tree (it is not a Document row).
+// `stamp` (a caller-supplied epoch ms) makes each recording a distinct object so
+// a re-record never collides with a still-cached previous take.
+export function buildStoryAudioKey(caseId: string, stamp: number, fileName: string): string {
+  return `cases/${caseId}/story/${stamp}-${sanitizeFileName(fileName)}`;
+}
+
+// Durable object URL. NOT publicly fetchable — the bucket is private, so this is
+// an identifier for staff tooling/audit; reads still go through presignDownload.
+export function objectUrl(key: string): string {
+  return `https://${R2_HOST}${objectUri(key)}`;
+}
+
+// Content-Type headers may carry codec params ("audio/webm;codecs=opus"); the
+// allowlists are on the bare type.
+export function baseMimeType(value: string): string {
+  return value.split(";")[0].trim().toLowerCase();
 }
 
 // Shared query-string signer for presigned GET/PUT URLs (host-only signed headers).

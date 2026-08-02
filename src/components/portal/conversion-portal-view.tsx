@@ -151,6 +151,11 @@ function ConversionPortalWizard({
   // true once a ConversionProfile row exists (loaded or saved this session).
   const [profileExists, setProfileExists] = useState(conversionProfile !== null);
 
+  // Presence of a confirmed voice recording — the second way to satisfy the
+  // PERSONAL_STORY guard. Only the flag matters client-side; the key itself is
+  // never needed here (playback goes through a presigned URL).
+  const [hasStoryAudio, setHasStoryAudio] = useState(!!conversionProfile?.storyAudioKey);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -257,7 +262,12 @@ function ConversionPortalWizard({
   const buildSnapshot = (): JourneySnapshot => ({
     client: { phone: form.phone, email: form.email || null, addressCity: form.addressCity || null },
     profile: profileExists
-      ? { communityName: form.communityName || null, sponsoringRabbi: form.sponsoringRabbi || null, personalStory: form.personalStory || null }
+      ? {
+          communityName: form.communityName || null,
+          sponsoringRabbi: form.sponsoringRabbi || null,
+          personalStory: form.personalStory || null,
+          storyAudioKey: hasStoryAudio ? "saved" : null,
+        }
       : null,
     mandatoryChecklist: items.filter((i) => i.isMandatory).map((i) => ({ status: i.status })),
     referenceCount: references.length,
@@ -392,7 +402,19 @@ function ConversionPortalWizard({
         <FamilyBody t={t} form={form} set={set} childRows={children} addChild={addChild} removeChild={removeChild} setChild={setChild} />
       )}
       {view === "WIZARD_BACKGROUND" && <BackgroundBody t={t} form={form} set={set} />}
-      {view === "PERSONAL_STORY" && <StoryBody t={t} form={form} set={set} />}
+      {view === "PERSONAL_STORY" && (
+        <StoryBody
+          t={t}
+          form={form}
+          set={set}
+          token={token}
+          hasAudio={hasStoryAudio}
+          // Confirming a recording upserts the ConversionProfile row server-side,
+          // so the local "profile exists" mirror must follow.
+          onAudioSaved={() => { setHasStoryAudio(true); setProfileExists(true); }}
+          honeypot={honeypot}
+        />
+      )}
       {view === "WIZARD_REFERENCES" && (
         <ReferencesBody
           t={t}

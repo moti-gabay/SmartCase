@@ -17,6 +17,7 @@ const complete = (): JourneySnapshot => ({
     communityName: "קהילת מרכז",
     sponsoringRabbi: "הרב כהן",
     personalStory: "הסיפור האישי שלי על הדרך ליהדות.",
+    storyAudioKey: null,
   },
   mandatoryChecklist: [{ status: "UPLOADED_PENDING_REVIEW" }, { status: "APPROVED" }],
   referenceCount: MIN_REFERENCES,
@@ -82,7 +83,7 @@ test("WIZARD_FAMILY fails safely when the profile row doesn't exist yet", () => 
 
 test("WIZARD_FAMILY passes once a profile row exists, even with all-empty family fields", () => {
   const s = complete();
-  s.profile = { communityName: null, sponsoringRabbi: null, personalStory: null };
+  s.profile = { communityName: null, sponsoringRabbi: null, personalStory: null, storyAudioKey: null };
   assert.deepEqual(canAdvance("WIZARD_FAMILY", s), { ok: true });
 });
 
@@ -102,7 +103,7 @@ test("WIZARD_BACKGROUND requires community and rabbi, never throws on null profi
 
 // ── PERSONAL_STORY (trimmed length validation) ─────────────────────────────────
 
-test("PERSONAL_STORY requires a non-empty trimmed story", () => {
+test("PERSONAL_STORY requires a non-empty trimmed story when there is no recording", () => {
   assert.deepEqual(canAdvance("PERSONAL_STORY", complete()), { ok: true });
 
   for (const story of [null, "", "   ", "\n\t "]) {
@@ -114,6 +115,30 @@ test("PERSONAL_STORY requires a non-empty trimmed story", () => {
   const nullProfile = complete();
   nullProfile.profile = null;
   assert.equal(canAdvance("PERSONAL_STORY", nullProfile).ok, false);
+});
+
+test("PERSONAL_STORY accepts a voice recording instead of written text", () => {
+  for (const story of [null, "", "   "]) {
+    const s = complete();
+    s.profile!.personalStory = story;
+    s.profile!.storyAudioKey = "cases/case_1/story/1750000000000-story.webm";
+    assert.deepEqual(canAdvance("PERSONAL_STORY", s), { ok: true }, "a recording alone must satisfy the step");
+  }
+});
+
+test("PERSONAL_STORY rejects a blank audio key just like blank text", () => {
+  for (const key of [null, "", "  "]) {
+    const s = complete();
+    s.profile!.personalStory = null;
+    s.profile!.storyAudioKey = key;
+    assert.deepEqual(canAdvance("PERSONAL_STORY", s), { ok: false, reason: "MISSING_PERSONAL_STORY" });
+  }
+});
+
+test("PERSONAL_STORY still needs a saved profile even with an audio key", () => {
+  const s = complete();
+  s.profile = null;
+  assert.deepEqual(canAdvance("PERSONAL_STORY", s), { ok: false, reason: "MISSING_PERSONAL_STORY" });
 });
 
 // ── WIZARD_REFERENCES ──────────────────────────────────────────────────────────

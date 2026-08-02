@@ -52,6 +52,10 @@ export interface JourneySnapshot {
     communityName: string | null;
     sponsoringRabbi: string | null;
     personalStory: string | null;
+    // Set once a voice recording is confirmed (PATCH .../story/upload). Its
+    // presence alone satisfies PERSONAL_STORY — transcription runs afterwards,
+    // so waiting for a transcript would block the client on a background job.
+    storyAudioKey: string | null;
   } | null;
   mandatoryChecklist: { status: DocumentStatus }[];
   // Number of saved recommenders. A count is enough because the references
@@ -90,7 +94,9 @@ export function canAdvance(step: CaseStep, s: JourneySnapshot): AdvanceCheck {
         : { ok: false, reason: "MISSING_BACKGROUND_FIELDS" };
 
     case "PERSONAL_STORY":
-      return s.profile !== null && filled(s.profile.personalStory)
+      // Written story OR a confirmed recording — the two are equivalent ways of
+      // telling the story, and the office accepts either.
+      return s.profile !== null && (filled(s.profile.personalStory) || filled(s.profile.storyAudioKey))
         ? { ok: true }
         : { ok: false, reason: "MISSING_PERSONAL_STORY" };
 

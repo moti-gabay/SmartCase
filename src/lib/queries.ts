@@ -670,6 +670,9 @@ export interface PortalCaseView {
     courtName?: string | null;
     additionalNotes?: string | null;
     personalStory?: string | null;
+    // Presence-only: the portal asks .../story/upload for a presigned playback
+    // URL when it needs to actually play the recording.
+    storyAudioKey?: string | null;
     children: { id: string; fullName: string; dateOfBirth?: string | null }[];
     references: PortalReference[];
   } | null;
@@ -740,6 +743,7 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
           courtName: c.conversionProfile.courtName,
           additionalNotes: c.conversionProfile.additionalNotes,
           personalStory: c.conversionProfile.personalStory,
+          storyAudioKey: c.conversionProfile.storyAudioKey,
           children: c.conversionProfile.children.map((ch) => ({
             id: ch.id,
             fullName: ch.fullName,

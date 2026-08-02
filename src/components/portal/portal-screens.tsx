@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { cn, formatDate, calculateAge } from "@/lib/utils";
 import {
   portalDict, translateChecklistLabel, translateChecklistDescription, type PortalLocale,
@@ -11,6 +12,7 @@ import {
   BookOpen, ClipboardList, HeartHandshake, Users2, User, Phone, Mail, MapPin,
   Plus, X, Upload, CheckCircle2, AlertTriangle, Loader2, CreditCard, FileBadge,
   Building2, Camera, FileText, ScrollText, ListChecks, CalendarClock, Sparkles, UserCheck,
+  Mic, Square, Play,
 } from "lucide-react";
 
 // ── Shared form shape (owned by the orchestrator, threaded into each screen) ──
@@ -213,7 +215,18 @@ export function BackgroundBody({ t, form, set }: { t: Dict; form: PortalForm; se
 }
 
 // ── Screen 6: PERSONAL_STORY ──
-export function StoryBody({ t, form, set }: { t: Dict; form: PortalForm; set: Setter }) {
+// Two equivalent ways to tell the story: the textarea (always available — the
+// fallback whenever recording is unsupported or the mic is denied) and a voice
+// recording. Either one alone satisfies the server guard.
+export function StoryBody({
+  t, form, set, token, hasAudio, onAudioSaved, honeypot,
+}: {
+  t: Dict; form: PortalForm; set: Setter;
+  token: string;
+  hasAudio: boolean;
+  onAudioSaved: () => void;
+  honeypot: string;
+}) {
   return (
     <div className={card}>
       <h1 className={heading}><ScrollText className="h-5 w-5 text-indigo-500" /> {t.storyTitle}</h1>
@@ -224,6 +237,167 @@ export function StoryBody({ t, form, set }: { t: Dict; form: PortalForm; set: Se
         value={form.personalStory}
         onChange={(e) => set("personalStory", e.target.value)}
       />
+      <StoryRecorder t={t} token={token} hasAudio={hasAudio} onAudioSaved={onAudioSaved} honeypot={honeypot} />
+    </div>
+  );
+}
+
+// MediaRecorder capture → presigned PUT to R2 → confirm. The blob never touches
+// a Next.js route (only its metadata does), matching the document pipeline.
+// Local playback uses the in-memory blob; a recording from a previous session is
+// played through a short-lived presigned GET fetched on demand.
+function StoryRecorder({
+  t, token, hasAudio, onAudioSaved, honeypot,
+}: {
+  t: Dict; token: string; hasAudio: boolean; onAudioSaved: () => void; honeypot: string;
+}) {
+  const [recording, setRecording] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(hasAudio);
+  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+
+  // Object URLs created for local playback are revoked on unmount / replacement.
+  const localUrlRef = useRef<string | null>(null);
+  useEffect(() => () => { if (localUrlRef.current) URL.revokeObjectURL(localUrlRef.current); }, []);
+
+  const supported =
+    typeof window !== "undefined" && typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+
+  const upload = async (blob: Blob) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const mimeType = blob.type || "audio/webm";
+      const ext = mimeType.includes("mp4") ? "m4a" : mimeType.includes("ogg") ? "ogg" : "webm";
+      const presignRes = await fetch(`/api/public/conversion/${token}/story/upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: `story.${ext}`, fileSize: blob.size, mimeType, honeypot }),
+      });
+      if (!presignRes.ok) throw new Error();
+      const { storageKey, upload: put } = await presignRes.json();
+
+      const putRes = await fetch(put.url, { method: "PUT", body: blob, headers: { "Content-Type": mimeType } });
+      if (!putRes.ok) throw new Error();
+
+      const confirmRes = await fetch(`/api/public/conversion/${token}/story/upload`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storageKey, honeypot }),
+      });
+      if (!confirmRes.ok) throw new Error();
+
+      setSaved(true);
+      onAudioSaved();
+    } catch {
+      setError(t.storyRecordFailed);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const start = async () => {
+    setError(null);
+    if (!supported) { setError(t.storyRecordUnsupported); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        // Release the mic as soon as capture ends — the tab must not keep the
+        // recording indicator on while the upload runs.
+        stream.getTracks().forEach((track) => track.stop());
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        if (localUrlRef.current) URL.revokeObjectURL(localUrlRef.current);
+        localUrlRef.current = URL.createObjectURL(blob);
+        setPlaybackUrl(localUrlRef.current);
+        void upload(blob);
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setRecording(true);
+    } catch {
+      setError(t.storyRecordDenied);
+    }
+  };
+
+  const stop = () => {
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    setRecording(false);
+  };
+
+  // Recording from an earlier session: fetch a fresh presigned playback URL.
+  const loadSaved = async () => {
+    setError(null);
+    try {
+      const res = await fetch(`/api/public/conversion/${token}/story/upload`);
+      if (!res.ok) throw new Error();
+      const { url } = await res.json();
+      setPlaybackUrl(url);
+    } catch {
+      setError(t.storyRecordFailed);
+    }
+  };
+
+  return (
+    <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+      <p className="text-sm font-semibold text-slate-800">{t.storyRecordTitle}</p>
+      <p className="mt-0.5 text-xs text-slate-500">{t.storyRecordIntro}</p>
+
+      {error && (
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {recording ? (
+          <button
+            type="button"
+            onClick={stop}
+            className="flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700"
+          >
+            <Square className="h-3.5 w-3.5" /> {t.storyRecordStop}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={start}
+            disabled={saving}
+            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+          >
+            <Mic className="h-3.5 w-3.5" /> {saved ? t.storyRecordAgain : t.storyRecordStart}
+          </button>
+        )}
+
+        {recording && (
+          <span className="flex items-center gap-1.5 text-xs font-medium text-red-600">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-red-600" /> REC
+          </span>
+        )}
+        {saving && (
+          <span className="flex items-center gap-1.5 text-xs text-slate-500">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t.storyRecordSaving}
+          </span>
+        )}
+        {saved && !saving && !recording && (
+          <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-600">
+            <CheckCircle2 className="h-3.5 w-3.5" /> {t.storyRecordSaved}
+          </span>
+        )}
+        {saved && !playbackUrl && !recording && !saving && (
+          <button type="button" onClick={loadSaved} className="text-xs font-medium text-indigo-600 hover:underline">
+            <Play className="me-1 inline h-3.5 w-3.5" />{t.storyRecordSaved}
+          </button>
+        )}
+      </div>
+
+      {playbackUrl && <audio className="mt-3 w-full" controls src={playbackUrl} />}
     </div>
   );
 }
