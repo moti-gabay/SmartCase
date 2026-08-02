@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/../auth";
 import { prisma } from "@/lib/prisma";
 import { presignDownload } from "@/core/storage/s3-storage";
+import { createPartFromUri } from "@google/genai";
 import { getGeminiClient } from "@/lib/ai/gemini";
 import {
   TRANSCRIPTION_BATCH_SIZE,
@@ -27,6 +28,11 @@ async function authorize(req: Request): Promise<boolean> {
   return !!session?.user;
 }
 
+// A large upload is ACTIVE within a few seconds; these bounds keep the wait well
+// inside the route's 60s budget rather than burning it on one stuck file.
+const FILE_ACTIVATION_POLLS = 10;
+const FILE_ACTIVATION_INTERVAL_MS = 1000;
+
 // Real ports: Prisma for the queue, R2 for the bytes, Gemini for the words.
 const ports: TranscriptionPorts = {
   listPending: async (limit) => {
@@ -37,6 +43,17 @@ const ports: TranscriptionPorts = {
       take: limit,
     });
     return rows.map((r) => ({ profileId: r.id, caseId: r.caseId, storyAudioKey: r.storyAudioKey! }));
+  },
+
+  // Rows stranded in PROCESSING by a dead invocation. updatedAt is the claim
+  // timestamp: the claim below is the write that last touched the row, and any
+  // later legitimate write would mean it is not stranded after all.
+  resetStaleClaims: async (before) => {
+    const res = await prisma.conversionProfile.updateMany({
+      where: { storyTranscriptionStatus: "PROCESSING", updatedAt: { lt: before } },
+      data: { storyTranscriptionStatus: "PENDING" },
+    });
+    return res.count;
   },
 
   // The status is part of the WHERE, so this is an atomic claim: count === 1
@@ -60,7 +77,7 @@ const ports: TranscriptionPorts = {
     return { bytes, mimeType };
   },
 
-  transcribe: async (bytes, mimeType) => {
+  transcribeInline: async (bytes, mimeType) => {
     const ai = getGeminiClient();
     const response = await ai.models.generateContent({
       model: TRANSCRIPTION_MODEL,
@@ -71,6 +88,47 @@ const ports: TranscriptionPorts = {
       config: { maxOutputTokens: 8192 },
     });
     return response.text ?? null;
+  },
+
+  // Files API path for recordings too large to inline. Note this is
+  // @google/genai's `ai.files` — the legacy GoogleAIFileManager belongs to the
+  // deprecated @google/generative-ai package, which this repo does not use.
+  files: {
+    upload: async (bytes, mimeType) => {
+      const ai = getGeminiClient();
+      // BlobPart wants a plain ArrayBuffer view; Buffer.from copies out of the
+      // possibly-pooled Uint8Array so the blob owns its own bytes.
+      const uploaded = await ai.files.upload({
+        file: new Blob([Buffer.from(bytes)], { type: mimeType }),
+        config: { mimeType },
+      });
+      if (!uploaded.name || !uploaded.uri) throw new Error("Gemini file upload returned no handle");
+
+      // Uploads land in PROCESSING and cannot be referenced until ACTIVE.
+      let file = uploaded;
+      for (let i = 0; i < FILE_ACTIVATION_POLLS && file.state === "PROCESSING"; i++) {
+        await new Promise((resolve) => setTimeout(resolve, FILE_ACTIVATION_INTERVAL_MS));
+        file = await ai.files.get({ name: uploaded.name });
+      }
+      if (file.state !== "ACTIVE") throw new Error(`Gemini file not ACTIVE (state: ${file.state})`);
+
+      return { name: uploaded.name, uri: uploaded.uri };
+    },
+
+    transcribeFromUri: async (uri, mimeType) => {
+      const ai = getGeminiClient();
+      const response = await ai.models.generateContent({
+        model: TRANSCRIPTION_MODEL,
+        contents: [createPartFromUri(uri, mimeType), { text: buildTranscriptionPrompt() }],
+        config: { maxOutputTokens: 8192 },
+      });
+      return response.text ?? null;
+    },
+
+    remove: async (name) => {
+      const ai = getGeminiClient();
+      await ai.files.delete({ name });
+    },
   },
 
   finish: async (profileId, status, transcript) => {
