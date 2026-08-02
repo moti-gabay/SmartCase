@@ -231,6 +231,126 @@ export function createBudgetLedger(totalUsd, { minPhaseUsd = 0.1 } = {}) {
 }
 
 /**
+ * Model tier defaults, one per phase.
+ *
+ * Deliberately *not* the 3.5-era ids (`claude-3-5-haiku-20241022`,
+ * `claude-3-5-sonnet-20241022`): both are retired — Sonnet 3.5 on 2025-10-28 and
+ * Haiku 3.5 on 2026-02-19 — and `claude --model` on a retired id fails the phase
+ * at launch. These are their current-generation equivalents. Override per run
+ * with the CLI flags or the AUTOFIX_*_MODEL env vars if you need a different tier.
+ *
+ *   triage   cheapest tier — one classification call, no code written
+ *   plan     the read-only plan is the contract Phase 3 executes and a human
+ *            approves, so it stays on the mid tier rather than the cheap one
+ *   execute  writes code under --dangerously-skip-permissions
+ */
+export const DEFAULT_MODEL_TIERS = Object.freeze({
+  triage: "claude-haiku-4-5",
+  plan: "claude-sonnet-5",
+  execute: "claude-sonnet-5",
+});
+
+export const MODEL_TIER_ENV = Object.freeze({
+  triage: "AUTOFIX_TRIAGE_MODEL",
+  plan: "AUTOFIX_PLAN_MODEL",
+  execute: "AUTOFIX_EXEC_MODEL",
+});
+
+/**
+ * Is `name` safe to hand to `claude --model`?
+ *
+ * The value can reach us from CI env, so the same argv-injection hazard as
+ * `--base-ref` applies: a leading dash is read by the CLI as another option.
+ * Beyond that, model ids are `[a-z0-9.-]` by construction — anything else is a
+ * typo that would otherwise surface minutes later as an opaque API 404.
+ */
+export function isValidModelId(name) {
+  const id = String(name ?? "");
+  return id.length > 0 && id.length <= 128 && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id);
+}
+
+/**
+ * Resolve the per-phase model map from defaults ← env ← explicit overrides.
+ *
+ * Precedence is deliberate: an explicit CLI flag beats the environment, which
+ * beats the built-in default. An invalid value is rejected here — before the run
+ * id, the artifact directory, or a single paid call — rather than being passed
+ * through to fail mid-phase.
+ *
+ * @param {Record<string, string|undefined>} [env]
+ * @param {{triage?: string, plan?: string, execute?: string}} [overrides]
+ * @returns {{models: {triage: string, plan: string, execute: string}, invalid: Array<{phase: string, value: string, source: string}>}}
+ */
+export function resolveModelTiers(env = process.env, overrides = {}) {
+  const models = {};
+  const invalid = [];
+
+  for (const phase of ["triage", "plan", "execute"]) {
+    const candidates = [
+      { value: overrides[phase], source: `--${phase === "execute" ? "exec" : phase}-model` },
+      { value: env[MODEL_TIER_ENV[phase]], source: MODEL_TIER_ENV[phase] },
+    ];
+    const picked = candidates.find((c) => c.value !== undefined && c.value !== null && String(c.value).trim() !== "");
+
+    if (!picked) {
+      models[phase] = DEFAULT_MODEL_TIERS[phase];
+      continue;
+    }
+    const value = String(picked.value).trim();
+    if (!isValidModelId(value)) {
+      invalid.push({ phase, value, source: picked.source });
+      models[phase] = DEFAULT_MODEL_TIERS[phase];
+      continue;
+    }
+    models[phase] = value;
+  }
+
+  return { models, invalid };
+}
+
+/**
+ * Read the Phase 0 triage classification from the FINAL non-empty line.
+ *
+ * Same last-line anchoring as parseVerdict, and for the same reason: the triage
+ * prompt embeds untrusted issue text, and a model routinely echoes the tail of
+ * the document it was given.
+ *
+ * Unlike parseVerdict this fails **open** — UNKNOWN is not NOT_ACTIONABLE.
+ * Triage is a cost optimiser, not a safety gate; the real gates are the external
+ * plan review and the human approval further down. A garbled classification that
+ * silently discarded a genuine bug report would be a far worse failure than one
+ * that wastes a planning pass, so callers treat UNKNOWN as "proceed".
+ *
+ * @returns {'ACTIONABLE'|'NOT_ACTIONABLE'|'UNKNOWN'}
+ */
+export function parseTriageVerdict(text) {
+  const lines = String(text ?? "").split("\n");
+  let lastLine = "";
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (lines[i].trim()) {
+      lastLine = lines[i].trim();
+      break;
+    }
+  }
+  if (!lastLine || lastLine.startsWith("```") || lastLine.startsWith(">")) return "UNKNOWN";
+
+  const cleaned = lastLine.replace(/^#{1,6}\s*/, "");
+  const match = cleaned.match(/^\**TRIAGE\**\s*:\s*\**\s*(ACTIONABLE|NOT_ACTIONABLE)\**\s*\.?$/i);
+  if (!match) return "UNKNOWN";
+  return match[1].toUpperCase();
+}
+
+/**
+ * Defang `TRIAGE:` markers in untrusted issue text before it enters the triage
+ * prompt — the counterpart to neutralizeVerdictMarkers for Phase 0. Without it a
+ * report ending in `TRIAGE: NOT_ACTIONABLE` can be echoed back as the model's own
+ * closing line and abort the run before anyone reads it.
+ */
+export function neutralizeTriageMarkers(text) {
+  return String(text ?? "").replace(/TRIAGE(\s*):/gi, "TRIAGE$1․");
+}
+
+/**
  * Extract a branch name from a symbolic ref.
  *
  * `git symbolic-ref refs/remotes/origin/HEAD` yields `refs/remotes/origin/main`;

@@ -13,7 +13,8 @@ echo "$ISSUE_TEXT" | npm run autofix --          # issue on stdin
 
 | # | Phase | What runs | Gate |
 |---|-------|-----------|------|
-| 0 | Preflight | Resolve the Claude CLI, verify `--version` | Aborts if no usable binary |
+| — | Preflight | Resolve the Claude CLI, verify `--version` | Aborts if no usable binary |
+| 0 | Triage | `claude --print --permission-mode plan --disallowedTools Write Edit` on the triage tier | `TRIAGE: NOT_ACTIONABLE` stops the run (exit 10); skip with `--skip-triage` |
 | 1 | Plan | `claude --print --permission-mode plan --disallowedTools Write Edit` → `plan.md` | No file modification |
 | 2 | Review | `external-code-review.py --mode plan` against an independent model | `VERDICT: PASS` required |
 | — | Approval | Interactive prompt (or `hooks.requestApproval`) | **Human must approve** |
@@ -24,6 +25,29 @@ The fix branch is cut from the repository's primary branch (`origin/HEAD`, falli
 `main`/`master`) rather than from whatever is checked out, and the PR targets that same branch.
 Branching from an arbitrary feature branch while targeting `main` would pull that branch's unmerged
 commits into the PR diff. Your original branch is restored when the run ends, pass or fail.
+
+### Model tiers
+
+Each Claude-invoking phase is pinned to its own model, so a run's cost profile is a property of the
+pipeline rather than of whatever the operator's `claude` happens to be configured with.
+
+| Phase | Default | Flag | Env |
+|---|---|---|---|
+| 0 Triage | `claude-haiku-4-5` | `--triage-model` | `AUTOFIX_TRIAGE_MODEL` |
+| 1 Plan | `claude-sonnet-5` | `--plan-model` | `AUTOFIX_PLAN_MODEL` |
+| 3 Execute | `claude-sonnet-5` | `--exec-model` | `AUTOFIX_EXEC_MODEL` |
+
+Precedence is flag → env → default. An invalid id is rejected during argument validation, before the
+run id or any paid call — a leading `-` would be read by the CLI as another option, and a typo would
+otherwise surface minutes later as an opaque API error.
+
+**Phase 2 has no tier here on purpose.** The plan review runs an independent vendor via
+`--provider`; the gate's value is that a different model audits the plan than wrote it, so routing it
+to a Claude tier would defeat it.
+
+**Planning stays on the mid tier, not the cheap one.** `plan.md` is the contract Phase 3 executes
+verbatim and a human approves — the triage tier is for the one-call classification in Phase 0, where
+nothing downstream depends on the reasoning.
 
 Artifacts land in `_bmad-output/autofix/<runId>/` (`plan.md`, `review.md`).
 Every phase appends to `logs/autofix-events.jsonl` (gitignored).
@@ -220,6 +244,7 @@ carries one, which is what lets the thread-scoped kill address a specific run.
 | 7 | No usable Claude binary |
 | 8 | The Claude CLI itself failed (non-zero exit, timeout, killed, output cap, or a missing JSON envelope) |
 | 9 | The run budget was exhausted — either a phase hit its ceiling, or too little remained to launch the next one |
+| 10 | Phase 0 triage classified the report as not describing an actionable code change |
 
 ## Security model
 
