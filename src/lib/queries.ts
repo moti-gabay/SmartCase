@@ -479,6 +479,10 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
           sponsoringRabbi: c.conversionProfile.sponsoringRabbi,
           courtName: c.conversionProfile.courtName,
           additionalNotes: c.conversionProfile.additionalNotes,
+          personalStory: c.conversionProfile.personalStory,
+          storyAudioKey: c.conversionProfile.storyAudioKey,
+          storyTranscript: c.conversionProfile.storyTranscript,
+          storyTranscriptionStatus: c.conversionProfile.storyTranscriptionStatus,
           submittedAt: iso(c.conversionProfile.submittedAt),
           children: c.conversionProfile.children.map((ch) => ({
             id: ch.id,

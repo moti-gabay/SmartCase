@@ -12,8 +12,10 @@ import {
   LETTER_TYPE_INSTRUCTIONS,
   PIPELINE_COLUMNS,
   CASE_STEP_LABELS,
+  TRANSCRIPTION_STATUS_LABELS,
 } from "../src/lib/constants";
 import { CASE_STEP_ORDER } from "../src/lib/portal/journey";
+import type { TranscriptionStatus } from "../src/types";
 
 test("every pipeline column has a label, color and dot", () => {
   for (const status of PIPELINE_COLUMNS) {
@@ -57,4 +59,12 @@ test("every portal journey step has a Hebrew label, and no orphan labels exist",
     assert.ok(CASE_STEP_LABELS[step], `missing label for ${step}`);
   }
   assert.deepEqual(Object.keys(CASE_STEP_LABELS).sort(), [...CASE_STEP_ORDER].sort());
+});
+
+test("every transcription status has a Hebrew label, and no orphan labels exist", () => {
+  const statuses: TranscriptionStatus[] = ["PENDING", "PROCESSING", "COMPLETED", "FAILED"];
+  for (const status of statuses) {
+    assert.ok(TRANSCRIPTION_STATUS_LABELS[status], `missing label for ${status}`);
+  }
+  assert.deepEqual(Object.keys(TRANSCRIPTION_STATUS_LABELS).sort(), [...statuses].sort());
 });

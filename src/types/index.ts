@@ -47,6 +47,9 @@ export type CaseStep =
   | "SCHEDULE_MEETING"
   | "TRACKING";
 
+// Server-side transcription state of a PERSONAL_STORY recording. Null means no
+// audio has been recorded at all.
+export type TranscriptionStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
 export type DocumentStatus = "MISSING" | "PENDING_UPLOAD" | "UPLOADED_PENDING_REVIEW" | "APPROVED" | "REJECTED" | "EXPIRED";
 export type DocumentType =
   | "NATIONAL_ID" | "MEDICAL_REPORT" | "PSYCHIATRIC_EVALUATION"
@@ -244,6 +247,12 @@ export interface ConversionProfileDetail {
   sponsoringRabbi?: string | null;
   courtName?: string | null;
   additionalNotes?: string | null;
+  personalStory?: string | null;
+  // Presence-only handle: staff playback goes through the authenticated
+  // /api/cases/[id]/story-audio route, never this key directly.
+  storyAudioKey?: string | null;
+  storyTranscript?: string | null;
+  storyTranscriptionStatus?: TranscriptionStatus | null;
   submittedAt?: string | null;
   children: ConversionChildDetail[];
   references: ConversionReferenceDetail[];
