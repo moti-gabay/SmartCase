@@ -17,6 +17,7 @@ import {
   parsePorcelainZ,
   neutralizeVerdictMarkers,
   parseDefaultBranchRef,
+  isValidGitRef,
   parseBudgetUsd,
   parseClaudeResult,
   createBudgetLedger,
@@ -293,6 +294,50 @@ test("parseDefaultBranchRef returns null rather than guessing", () => {
   assert.equal(parseDefaultBranchRef(""), null);
   assert.equal(parseDefaultBranchRef(null), null);
   assert.equal(parseDefaultBranchRef("fatal: ref not found"), null);
+});
+
+test("isValidGitRef accepts the branch names --base-ref will really be given", () => {
+  assert.equal(isValidGitRef("main"), true);
+  assert.equal(isValidGitRef("test/verify-claude-fix"), true);
+  assert.equal(isValidGitRef("feature/PR-123_some.thing"), true);
+  assert.equal(isValidGitRef("release/v2.1"), true);
+});
+
+test("isValidGitRef rejects a ref git would read as an option", () => {
+  // The security case. --base-ref carries a PR's headRefName, which an outside
+  // contributor chooses; a leading dash turns a git operand into a git flag.
+  assert.equal(isValidGitRef("--upload-pack=touch /tmp/pwned"), false);
+  assert.equal(isValidGitRef("-x"), false);
+});
+
+test("isValidGitRef enforces git's ref-name grammar", () => {
+  for (const bad of [
+    "",
+    "  ",
+    "has space",
+    "a..b",
+    "a//b",
+    "/leading",
+    "trailing/",
+    "trailing.",
+    "hot.lock",
+    "feature/.hidden",
+    "tilde~1",
+    "caret^",
+    "colon:ref",
+    "question?",
+    "star*",
+    "bracket[0]",
+    "back\\slash",
+    "head@{1}",
+    "null byte",
+    "tab\tsep",
+  ]) {
+    assert.equal(isValidGitRef(bad), false, `expected ${JSON.stringify(bad)} to be rejected`);
+  }
+  assert.equal(isValidGitRef(null), false);
+  assert.equal(isValidGitRef(undefined), false);
+  assert.equal(isValidGitRef("a".repeat(256)), false);
 });
 
 test("parsePorcelainZ tolerates empty and malformed input", () => {

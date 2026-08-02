@@ -76,7 +76,7 @@ jobs:
           jq -r '"head_ref=\(.headRefName)\nbase_ref=\(.baseRefName)"' <<<"$PR_JSON" >> "$GITHUB_OUTPUT"
 
       - name: Checkout PR head branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ steps.pr.outputs.head_ref }}
           # Full history: the pipeline cuts its fix branch from origin/<default>
@@ -84,7 +84,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -132,6 +132,7 @@ jobs:
           # argv element — never interpolated into the script body, where a
           # comment containing $(...) would execute on the runner.
           COMMENT_BODY: ${{ github.event.comment.body }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
         run: |
           set -o pipefail
           # --yes    : no TTY here, so the interactive approval gate must be skipped
@@ -140,7 +141,11 @@ jobs:
           # --provider openai : the default (gemini) would need GEMINI_API_KEY
           # --       : everything after is issue text, so a comment starting with
           #            a dash is not parsed as a flag
-          npm run autofix -- --yes --no-pr --provider openai -- "$COMMENT_BODY" \
+          # --base-ref: cut the fix branch from the PR's head, not from main.
+          # Without it the agent plans against main and cannot see the code the
+          # PR introduced — verified live: it reported "no changes" for a defect
+          # that was plainly present on the PR branch.
+          npm run autofix -- --yes --no-pr --provider openai --base-ref "$HEAD_REF" -- "$COMMENT_BODY" \
             2>&1 | tee /tmp/autofix.log
           # Outcome is judged by the harvest step (did a fix branch appear?), not
           # by this exit code — the pipeline exits non-zero for both "review
@@ -158,7 +163,7 @@ jobs:
           set -euo pipefail
 
           # The pipeline commits onto its own `fix/slack-issue-<runId>` branch cut
-          # from origin/<default>. On a fresh checkout no such branch pre-exists,
+          # from origin/$HEAD_REF. On a fresh checkout no such branch pre-exists,
           # so any that is present now was created by this run. Its absence means
           # the pipeline aborted before Phase 4 (review rejected, tests failed,
           # forbidden paths, or no changes produced).
@@ -168,12 +173,28 @@ jobs:
             exit 0
           fi
 
+          # A branch can exist while carrying no commit of its own: the pipeline
+          # only deletes it in a best-effort `finally`, so a failed cleanup would
+          # leave the tip sitting exactly on origin/$HEAD_REF. Cherry-picking that
+          # tip would re-apply an unrelated commit onto the PR and report it as an
+          # auto-fix. Count first, and only harvest a branch that is genuinely ahead.
+          AHEAD="$(git rev-list --count "origin/${HEAD_REF}..${FIX_BRANCH}")"
+          if [ "$AHEAD" -eq 0 ]; then
+            echo "Fix branch $FIX_BRANCH has no commits of its own — nothing to harvest."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Harvesting $AHEAD commit(s) from $FIX_BRANCH."
+
           git checkout --force "$HEAD_REF"
+          # Pick the whole range, not just the tip: AHEAD is a count, and a
+          # bare `cherry-pick <branch>` would silently drop everything below the
+          # last commit if the pipeline ever makes more than one.
           # -n stages without committing, so the `git status --porcelain` check
           # below is meaningful and the commit carries the requested message.
-          # A conflict is expected when the PR branch has diverged from the base
-          # the fix was planned against — report it rather than pushing a mess.
-          if ! git cherry-pick -n "$FIX_BRANCH"; then
+          # With --base-ref the fix is cut from this same branch, so a conflict now
+          # means the branch moved mid-run — report it rather than pushing a mess.
+          if ! git cherry-pick -n "origin/${HEAD_REF}..${FIX_BRANCH}"; then
             git cherry-pick --abort || git reset --hard HEAD
             echo "changed=conflict" >> "$GITHUB_OUTPUT"
             exit 0

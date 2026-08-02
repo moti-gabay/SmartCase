@@ -22,6 +22,7 @@ import {
   parsePorcelainZ,
   neutralizeVerdictMarkers,
   parseDefaultBranchRef,
+  isValidGitRef,
   parseBudgetUsd,
   parseClaudeResult,
   createBudgetLedger,
@@ -399,12 +400,16 @@ async function assertSafeRepoState(branchToCreate) {
 }
 
 /**
- * The repository's primary branch — the PR target.
+ * The repository's primary branch — the default PR target.
  *
  * Fix branches are cut from this, not from whatever happened to be checked out,
  * so the PR diff contains only the fix. Branching from an arbitrary feature
  * branch while targeting main would drag that branch's unmerged commits into
  * the PR.
+ *
+ * `--base-ref` overrides this for the one case where the rule is wrong: fixing
+ * a defect that exists only on a PR branch. There the caller is targeting that
+ * branch too, so "unmerged commits leak into the diff" does not apply.
  */
 async function resolveDefaultBranch() {
   const symbolic = await git(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]).catch(() => "");
@@ -472,7 +477,7 @@ ${plan}
 /**
  * @param {string} issueText  Untrusted issue report.
  * @param {{onPhase?: Function, requestApproval?: Function, report?: Function}} hooks
- * @param {{provider?: string, createPr?: boolean, dryRun?: boolean, env?: object, now?: string}} options
+ * @param {{provider?: string, createPr?: boolean, dryRun?: boolean, baseRef?: string, env?: object, now?: string}} options
  */
 export async function runPipeline(issueText, hooks = {}, options = {}) {
   const onPhase = hooks.onPhase ?? (() => {});
@@ -486,6 +491,13 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
 
   const issue = String(issueText ?? "").trim();
   if (!issue) throw new AutofixError(EXIT.BAD_INPUT, "issue text is empty");
+
+  // Validated here, before the run id, the artifact directory, or a single paid
+  // call — a bad ref must cost nothing. The value originates from a PR's
+  // headRefName, so it is attacker-chosen text, not operator input.
+  if (options.baseRef != null && !isValidGitRef(options.baseRef)) {
+    throw new AutofixError(EXIT.BAD_INPUT, `invalid --base-ref: ${JSON.stringify(String(options.baseRef))}`, "must be a valid git branch name");
+  }
 
   const runId = runIdFor(issue, now);
   const branch = branchNameFor(runId);
@@ -560,10 +572,16 @@ export async function runPipeline(issueText, hooks = {}, options = {}) {
   // startBranch is only remembered so cleanup can put the operator back where
   // they were; the PR always targets the repository's primary branch.
   const startBranch = options.dryRun ? null : await assertSafeRepoState(branch);
-  const baseBranch = options.dryRun ? null : await resolveDefaultBranch();
+  // An explicit --base-ref overrides the default-branch lookup. This is what
+  // lets PR auto-fix work at all: without it the fix is cut from main and the
+  // agent cannot see the very code the PR introduced, so it correctly reports
+  // "no changes" for a defect that is plainly there on the PR branch.
+  const baseBranch = options.dryRun ? null : options.baseRef ?? (await resolveDefaultBranch());
 
   if (options.dryRun) {
-    const info = { runId, branch, claudeBin: claude.path, claudeSource: claude.source, provider, artifactDir };
+    // baseRef is echoed (not resolved — resolveDefaultBranch needs a real repo
+    // state) so --dry-run can confirm the flag actually threaded through.
+    const info = { runId, branch, baseRef: options.baseRef ?? "(default branch)", claudeBin: claude.path, claudeSource: claude.source, provider, artifactDir };
     onPhase(0, "dry-run", JSON.stringify(info, null, 2));
     log("dry-run", "preflight", { exit_code: 0 });
     return { ...info, dryRun: true };

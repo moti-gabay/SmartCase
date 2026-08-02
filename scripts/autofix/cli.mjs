@@ -16,6 +16,9 @@ Reads the issue from argv, or from stdin when no positional argument is given.
 
 Options:
   --provider <name>   Plan reviewer: gemini | openai | deepseek  (default: gemini)
+  --base-ref <ref>    Cut the fix branch from <ref> instead of the repository's
+                      default branch. Use when the defect exists only on a
+                      feature/PR branch — cutting from main would hide it.
   --yes               Skip the interactive approval prompt (DANGEROUS — this is
                       the only gate before 'claude --dangerously-skip-permissions')
   --no-pr             Stop after the tests pass; do not push or open a PR
@@ -46,6 +49,13 @@ function parseArgs(argv) {
         throw new AutofixError(EXIT.BAD_INPUT, `unknown provider: ${value}`, `choose one of: ${PROVIDERS.join(", ")}`);
       }
       options.provider = value;
+      i += 1;
+    } else if (arg === "--base-ref") {
+      const value = argv[i + 1];
+      // Same trap as --provider: `--base-ref --yes` would otherwise swallow the
+      // flag and cut the branch from a ref literally named "--yes".
+      if (!value || value.startsWith("-")) throw new AutofixError(EXIT.BAD_INPUT, "--base-ref needs a value");
+      options.baseRef = value;
       i += 1;
     } else if (arg === "--yes") options.yes = true;
     else if (arg === "--no-pr") options.createPr = false;
@@ -165,6 +175,7 @@ async function main() {
     provider: options.provider,
     createPr: options.createPr,
     dryRun: options.dryRun,
+    baseRef: options.baseRef,
   });
   return EXIT.OK;
 }

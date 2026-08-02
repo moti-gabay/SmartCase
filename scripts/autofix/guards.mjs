@@ -242,6 +242,36 @@ export function parseDefaultBranchRef(ref) {
   return match ? match[1] : null;
 }
 
+/**
+ * Is `name` safe to hand to git as a branch name?
+ *
+ * This gates `--base-ref`, whose value reaches the orchestrator from a CI job
+ * that derived it from a PR's `headRefName` — i.e. from a branch name an
+ * outside contributor chose. Two distinct hazards:
+ *
+ *   1. Argv injection. A ref beginning with `-` is read by git as an option,
+ *      not an operand: `git fetch origin --upload-pack=...` runs a command.
+ *      Nothing downstream uses `--` consistently enough to rely on, so the
+ *      leading dash is rejected here instead.
+ *   2. Ref-name grammar. git-check-ref-format's rules — no `..`, no ` ~^:?*[\`,
+ *      no ASCII control characters, no `.lock` suffix, no leading/trailing or
+ *      doubled `/`, no trailing dot. An invalid name would fail later anyway,
+ *      but as an opaque git error several minutes into a paid run.
+ *
+ * Returns a boolean rather than throwing so the caller owns the error message.
+ */
+export function isValidGitRef(name) {
+  const ref = String(name ?? "");
+  if (!ref || ref.length > 255) return false;
+  if (ref.startsWith("-")) return false;
+  if (/[\x00-\x20\x7f~^:?*[\\]/.test(ref)) return false;
+  if (ref.includes("..") || ref.includes("//") || ref.includes("@{")) return false;
+  if (ref.startsWith("/") || ref.endsWith("/")) return false;
+  if (ref.endsWith(".") || ref.endsWith(".lock")) return false;
+  if (ref.split("/").some((segment) => segment.startsWith(".") || segment.endsWith(".lock"))) return false;
+  return true;
+}
+
 /** FNV-1a 32-bit — small, dependency-free, and stable across runs. */
 function fnv1a(text) {
   let hash = 0x811c9dc5;
