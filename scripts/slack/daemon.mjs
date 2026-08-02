@@ -138,6 +138,7 @@ function describeFailure(err) {
     [EXIT.FORBIDDEN_PATHS]: "🛡️ ההרצה נגעה בקבצים אסורים — השינוי בוטל",
     [EXIT.NO_CLAUDE_BIN]: "❌ לא נמצא בינארי claude תקין",
     [EXIT.CLAUDE_FAILED]: "❌ הרצת claude נכשלה",
+    [EXIT.BUDGET_EXHAUSTED]: "💸 תקציב ההרצה אזל",
   };
   return `${byCode[err.code] ?? "❌ ההרצה נכשלה"} (קוד ${err.code})\n${err.message}`;
 }
@@ -167,7 +168,7 @@ async function handleTrigger(event) {
     return;
   }
 
-  activeRun = { threadTs, user: event.user, startedAt: Date.now() };
+  activeRun = { threadTs, user: event.user, startedAt: Date.now(), runId: null };
   logEvent({ kind: "trigger", user: event.user, thread_ts: threadTs, issue_length: issue.length });
 
   await say(`👋 קיבלתי. מתחיל בדיקה — אעדכן כאן בכל שלב.\n\n> ${issue.slice(0, 300)}`, threadTs);
@@ -199,16 +200,43 @@ async function handleTrigger(event) {
       return approvals.wait(threadTs, { allowlist, promptTs: prompt.ts });
     },
 
-    onNotify(event, detail) {
+    onNotify(notifyEvent, detail) {
       // Lifecycle pages. The approval prompt itself is posted by
       // requestApproval; this adds the machine-readable marker and a nudge for
       // the case where the operator is not watching the thread.
+      //
+      // Audited to slack-events.jsonl before the post, and independently of it:
+      // runPipeline already records the event in autofix-events.jsonl, but this
+      // is the transport's own ledger — the record of what an operator was
+      // actually paged about must survive a Slack API call that fails. Writing
+      // it after a failed post would lose exactly the events that matter most.
+      logEvent({
+        kind: "notification",
+        event: notifyEvent,
+        user: event.user,
+        thread_ts: threadTs,
+        run_id: detail.runId ?? null,
+        outcome: detail.outcome ?? null,
+        exit_code: detail.exit_code ?? null,
+        pr_url: detail.pr_url ?? null,
+        awaiting: detail.awaiting ?? null,
+        spent_usd: detail.spent_usd ?? null,
+        remaining_usd: detail.remaining_usd ?? null,
+        phase: detail.phase ?? null,
+      });
+
+      // The kill switch addresses runs by id; remember the one this thread owns
+      // so `עצור` cannot stop a later, unrelated run.
+      if (activeRun && detail.runId) activeRun.runId = detail.runId;
+
       const text =
-        event === "input_required"
+        notifyEvent === "input_required"
           ? `🔔 *נדרשת פעולה שלך* — ההרצה ממתינה לאישור (${detail.awaiting}). ללא מענה היא תידחה אוטומטית.`
-          : detail.outcome === "success"
-            ? `🔔 ההרצה הסתיימה בהצלחה${detail.pr_url ? ` — ${detail.pr_url}` : ""}`
-            : `🔔 ההרצה הסתיימה בכישלון (קוד ${detail.exit_code})`;
+          : notifyEvent === "budget_exhausted"
+            ? `💸 *תקציב ההרצה אזל* לפני שלב \`${detail.phase}\` — נוצלו $${detail.spent_usd} מתוך $${detail.budget_usd}. לא הופעל סוכן נוסף.`
+            : detail.outcome === "success"
+              ? `🔔 ההרצה הסתיימה בהצלחה${detail.pr_url ? ` — ${detail.pr_url}` : ""}`
+              : `🔔 ההרצה הסתיימה בכישלון (קוד ${detail.exit_code})`;
       say(text, threadTs).catch((err) => console.error(`[slack] notify post failed: ${err.message}`));
     },
 
@@ -219,6 +247,7 @@ async function handleTrigger(event) {
           `ענף: \`${summary.branch}\` → \`${summary.baseBranch}\``,
           `קבצים ששונו: ${summary.filesChanged}`,
           `טסטים: ${summary.testResults.join(", ")}`,
+          `עלות: $${summary.spentUsd} מתוך $${summary.budgetUsd}`,
           summary.prUrl ? `PR: ${summary.prUrl}` : "PR: לא נפתח (--no-pr)",
         ].join("\n"),
         threadTs
@@ -258,8 +287,23 @@ app.message(async ({ message }) => {
       logEvent({ kind: "kill-refused", user: message.user, thread_ts: message.thread_ts, reason: "not-allowlisted" });
       return;
     }
-    const result = killActiveRun();
-    logEvent({ kind: "kill", user: message.user, thread_ts: message.thread_ts, killed: result.killed, reason: result.reason });
+    // A `עצור` only stops the run its own thread started. Typed late into an
+    // old thread it must not reach into a different run that began since —
+    // refuse outright rather than falling through to an untargeted kill.
+    if (activeRun && activeRun.threadTs !== message.thread_ts) {
+      logEvent({ kind: "kill-refused", user: message.user, thread_ts: message.thread_ts, reason: "thread-does-not-own-active-run" });
+      await say("⚠️ ההרצה הפעילה שייכת לשרשור אחר — עצור אותה שם.", message.thread_ts);
+      return;
+    }
+    const result = killActiveRun(activeRun?.runId ?? undefined);
+    logEvent({
+      kind: "kill",
+      user: message.user,
+      thread_ts: message.thread_ts,
+      run_id: activeRun?.runId ?? null,
+      killed: result.killed,
+      reason: result.reason,
+    });
     await say(result.killed ? `🛑 ההרצה נעצרה — ${result.reason}` : `⚠️ לא נעצר: ${result.reason}`, message.thread_ts);
     return;
   }

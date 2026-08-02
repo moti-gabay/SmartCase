@@ -155,6 +155,7 @@ async function main() {
       console.error(`   branch:  ${summary.branch}`);
       console.error(`   changed: ${summary.filesChanged} file(s)`);
       console.error(`   tests:   ${summary.testResults.join(", ")}`);
+      console.error(`   cost:    $${summary.spentUsd} of $${summary.budgetUsd}`);
       console.error(`   PR:      ${summary.prUrl ?? "(skipped: --no-pr)"}`);
       console.error("=".repeat(72));
     },
