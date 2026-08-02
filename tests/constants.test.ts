@@ -13,6 +13,7 @@ import {
   PIPELINE_COLUMNS,
   CASE_STEP_LABELS,
   TRANSCRIPTION_STATUS_LABELS,
+  isTranscribableOnDemand,
 } from "../src/lib/constants";
 import { CASE_STEP_ORDER } from "../src/lib/portal/journey";
 import type { TranscriptionStatus } from "../src/types";
@@ -67,4 +68,20 @@ test("every transcription status has a Hebrew label, and no orphan labels exist"
     assert.ok(TRANSCRIPTION_STATUS_LABELS[status], `missing label for ${status}`);
   }
   assert.deepEqual(Object.keys(TRANSCRIPTION_STATUS_LABELS).sort(), [...statuses].sort());
+});
+
+test("isTranscribableOnDemand allows exactly the retryable transcription states", () => {
+  // PENDING = not picked up yet, FAILED = retry. PROCESSING must be excluded so
+  // the button can't race an in-flight run; COMPLETED needs no action.
+  assert.equal(isTranscribableOnDemand("PENDING"), true);
+  assert.equal(isTranscribableOnDemand("FAILED"), true);
+  assert.equal(isTranscribableOnDemand("PROCESSING"), false);
+  assert.equal(isTranscribableOnDemand("COMPLETED"), false);
+});
+
+test("isTranscribableOnDemand is false when there is no transcription state at all", () => {
+  // Null is the no-audio case — the button must not appear.
+  assert.equal(isTranscribableOnDemand(null), false);
+  assert.equal(isTranscribableOnDemand(undefined), false);
+  assert.equal(isTranscribableOnDemand(""), false);
 });
