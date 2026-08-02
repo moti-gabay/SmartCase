@@ -103,6 +103,14 @@ jobs:
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Point origin/HEAD at the default branch
+        # resolveDefaultBranch() in pipeline.mjs reads `refs/remotes/origin/HEAD`,
+        # falling back to a LOCAL main/master. actions/checkout creates neither:
+        # it leaves only refs/remotes/origin/main, which `git rev-parse main` does
+        # not resolve. Without this the pipeline aborts at preflight with exit 5
+        # ("cannot determine the repository's default branch") before doing any work.
+        run: git remote set-head origin --auto
+
       - name: Configure git identity
         run: |
           git config user.name "claude-ai[bot]"
