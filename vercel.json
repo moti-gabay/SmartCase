@@ -14,6 +14,13 @@
     }
   },
 
+  "crons": [
+    {
+      "path": "/api/ai/transcribe",
+      "schedule": "*/15 * * * *"
+    }
+  ],
+
   "headers": [
     {
       "source": "/api/(.*)",

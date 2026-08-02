@@ -145,7 +145,7 @@ const ports: TranscriptionPorts = {
   logError: (message, err) => console.error(message, err),
 };
 
-export async function POST(req: Request) {
+async function handle(req: Request) {
   if (!(await authorize(req))) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
 
   try {
@@ -156,3 +156,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "התמלול נכשל" }, { status: 500 });
   }
 }
+
+// GET is what Vercel Cron actually issues (its dispatcher defaults to GET), so
+// the scheduled invocation would 405 against a POST-only route. POST stays for
+// the manual staff trigger. Both run the same guarded handler — the batch is
+// idempotent per row thanks to the atomic PENDING → PROCESSING claim, so
+// exposing it on a "safe" verb costs nothing.
+export const GET = handle;
+export const POST = handle;
