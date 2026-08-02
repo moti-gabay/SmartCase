@@ -149,6 +149,15 @@ export const CASE_STEP_LABELS: Record<string, string> = {
   TRACKING:          "מעקב תיק",
 };
 
+// Transcription state of a client's recorded personal story. Only surfaced in
+// the backoffice — the portal never shows it.
+export const TRANSCRIPTION_STATUS_LABELS: Record<string, string> = {
+  PENDING:    "ממתין לתמלול",
+  PROCESSING: "בתמלול",
+  COMPLETED:  "תומלל",
+  FAILED:     "התמלול נכשל",
+};
+
 export const NOTE_TYPE_LABELS: Record<string, string> = {
   INTERNAL:          "הערה פנימית",
   CALL_LOG:          "שיחת טלפון",

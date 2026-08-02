@@ -1,6 +1,7 @@
 import { cn, formatDate, formatCurrency, calculateAge } from "@/lib/utils";
 import { PrintLetterhead } from "@/components/print/print-letterhead";
 import { PortalStepControl } from "@/components/cases/portal-step-control";
+import { PersonalStoryPanel } from "@/components/cases/personal-story-panel";
 import { CASE_STATUS_LABELS, CASE_TYPE_LABELS } from "@/lib/constants";
 import type { CaseDetail } from "@/types";
 import {
@@ -171,6 +172,13 @@ export function CaseInfoPanel({ caseDetail }: CaseInfoPanelProps) {
                 </ul>
               </div>
             )}
+            <PersonalStoryPanel
+              caseId={caseDetail.id}
+              personalStory={caseDetail.conversionProfile.personalStory}
+              hasAudio={!!caseDetail.conversionProfile.storyAudioKey}
+              transcript={caseDetail.conversionProfile.storyTranscript}
+              transcriptionStatus={caseDetail.conversionProfile.storyTranscriptionStatus}
+            />
             {caseDetail.conversionProfile.submittedAt && (
               <Row icon={Clock} label="עודכן על ידי הלקוח" value={formatDate(caseDetail.conversionProfile.submittedAt)} />
             )}
