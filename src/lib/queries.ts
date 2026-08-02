@@ -624,6 +624,17 @@ export interface PortalActivityEntry {
   createdAt: string;
 }
 
+// A recommender as the portal sees it. Client-owned data only — no staff notes
+// and no document payload, just the optional attachment's id.
+export interface PortalReference {
+  id: string;
+  fullName: string;
+  phone: string;
+  role: string;
+  relationship?: string | null;
+  documentId?: string | null;
+}
+
 export interface PortalCaseView {
   id: string;
   caseNumber: string;
@@ -651,6 +662,7 @@ export interface PortalCaseView {
     additionalNotes?: string | null;
     personalStory?: string | null;
     children: { id: string; fullName: string; dateOfBirth?: string | null }[];
+    references: PortalReference[];
   } | null;
   checklist: PortalChecklistItem[];
   activities: PortalActivityEntry[];
@@ -673,7 +685,9 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
           phone: true, email: true, addressCity: true, locale: true,
         },
       },
-      conversionProfile: { include: { children: true } },
+      conversionProfile: {
+        include: { children: true, references: { orderBy: { createdAt: "asc" } } },
+      },
       checklist: {
         include: { template: true, document: { select: { reviewNotes: true } } },
         orderBy: { template: { sortOrder: "asc" } },
@@ -721,6 +735,14 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
             id: ch.id,
             fullName: ch.fullName,
             dateOfBirth: iso(ch.dateOfBirth),
+          })),
+          references: c.conversionProfile.references.map((r) => ({
+            id: r.id,
+            fullName: r.fullName,
+            phone: r.phone,
+            role: r.role,
+            relationship: r.relationship,
+            documentId: r.documentId,
           })),
         }
       : null,

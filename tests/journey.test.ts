@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   CASE_STEP_ORDER,
+  MIN_REFERENCES,
   nextStep,
   isClientAdvanceable,
   canAdvance,
@@ -18,6 +19,7 @@ const complete = (): JourneySnapshot => ({
     personalStory: "הסיפור האישי שלי על הדרך ליהדות.",
   },
   mandatoryChecklist: [{ status: "UPLOADED_PENDING_REVIEW" }, { status: "APPROVED" }],
+  referenceCount: MIN_REFERENCES,
 });
 
 // Fresh case: nothing saved yet — profile row doesn't exist (lazy creation).
@@ -25,6 +27,7 @@ const empty = (): JourneySnapshot => ({
   client: { phone: "", email: null, addressCity: null },
   profile: null,
   mandatoryChecklist: [{ status: "MISSING" }],
+  referenceCount: 0,
 });
 
 // ── step ordering ──────────────────────────────────────────────────────────────
@@ -111,6 +114,40 @@ test("PERSONAL_STORY requires a non-empty trimmed story", () => {
   const nullProfile = complete();
   nullProfile.profile = null;
   assert.equal(canAdvance("PERSONAL_STORY", nullProfile).ok, false);
+});
+
+// ── WIZARD_REFERENCES ──────────────────────────────────────────────────────────
+
+test("WIZARD_REFERENCES sits between PERSONAL_STORY and PENDING_DOCS", () => {
+  assert.equal(nextStep("PERSONAL_STORY"), "WIZARD_REFERENCES");
+  assert.equal(nextStep("WIZARD_REFERENCES"), "PENDING_DOCS");
+});
+
+test("WIZARD_REFERENCES requires at least MIN_REFERENCES saved recommenders", () => {
+  assert.deepEqual(canAdvance("WIZARD_REFERENCES", complete()), { ok: true });
+
+  for (let n = 0; n < MIN_REFERENCES; n++) {
+    const s = complete();
+    s.referenceCount = n;
+    assert.deepEqual(
+      canAdvance("WIZARD_REFERENCES", s),
+      { ok: false, reason: "MISSING_REFERENCES" },
+      `${n} reference(s) must not pass the guard`
+    );
+  }
+});
+
+test("WIZARD_REFERENCES still advances when more than the minimum are saved", () => {
+  const s = complete();
+  s.referenceCount = MIN_REFERENCES + 3;
+  assert.deepEqual(canAdvance("WIZARD_REFERENCES", s), { ok: true });
+});
+
+test("WIZARD_REFERENCES is client-advanceable and never depends on the profile row", () => {
+  assert.ok(isClientAdvanceable("WIZARD_REFERENCES"));
+  const s = complete();
+  s.profile = null; // references are counted independently of profile field state
+  assert.deepEqual(canAdvance("WIZARD_REFERENCES", s), { ok: true });
 });
 
 // ── PENDING_DOCS ───────────────────────────────────────────────────────────────

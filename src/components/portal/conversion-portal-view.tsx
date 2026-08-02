@@ -1,14 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { PortalCaseView, PortalChecklistItem } from "@/lib/queries";
+import type { PortalCaseView, PortalChecklistItem, PortalReference } from "@/lib/queries";
 import { PORTAL_LOCALE_DIR, portalDict, type PortalLocale } from "@/lib/i18n/conversion-portal";
 import { CASE_STEP_ORDER, canAdvance, isClientAdvanceable, type JourneySnapshot } from "@/lib/portal/journey";
 import type { CaseStep } from "@/types";
 import { LanguageSwitcher } from "@/components/portal/language-switcher";
 import {
   WizardProgress, WelcomeBody, OverviewBody, PersonalBody, FamilyBody, BackgroundBody,
-  StoryBody, DocumentsBody, PassiveBody, type PortalForm, type ChildRow,
+  StoryBody, ReferencesBody, DocumentsBody, PassiveBody,
+  type PortalForm, type ChildRow, type ReferenceDraft,
 } from "@/components/portal/portal-screens";
 import { Scale, ShieldAlert, Loader2, ArrowLeft } from "lucide-react";
 
@@ -162,6 +163,95 @@ function ConversionPortalWizard({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingItemId = useRef<string | null>(null);
 
+  // References persist through their own route the moment they're saved (they
+  // carry server ids), so this list is the live mirror of the DB rows.
+  const [references, setReferences] = useState<PortalReference[]>(conversionProfile?.references ?? []);
+  const [draft, setDraft] = useState<ReferenceDraft | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [refBusyId, setRefBusyId] = useState<string | null>(null);
+  const [refError, setRefError] = useState<string | null>(null);
+
+  const setDraftField = (k: keyof ReferenceDraft, v: string) =>
+    setDraft((d) => (d ? { ...d, [k]: v } : d));
+
+  const startAddReference = () => {
+    setRefError(null);
+    setEditingId(null);
+    setDraft({ fullName: "", phone: "", role: "", relationship: "" });
+  };
+
+  const startEditReference = (r: PortalReference) => {
+    setRefError(null);
+    setEditingId(r.id);
+    setDraft({ fullName: r.fullName, phone: r.phone, role: r.role, relationship: r.relationship ?? "" });
+  };
+
+  const cancelReference = () => {
+    setRefError(null);
+    setEditingId(null);
+    setDraft(null);
+  };
+
+  const saveReference = async () => {
+    if (!draft) return;
+    setRefError(null);
+    if (!draft.fullName.trim() || !draft.phone.trim() || !draft.role.trim()) {
+      setRefError(t.referenceIncomplete);
+      return;
+    }
+    setRefBusyId(editingId ?? "__new__");
+    try {
+      const res = await fetch(`/api/public/conversion/${token}/references`, {
+        method: editingId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...draft, ...(editingId ? { id: editingId } : {}), honeypot }),
+      });
+      if (res.status === 404 && !editingId) { onExpired(); return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRefError(data.code ? stepError(data.code) : (data.error ?? t.referenceSaveFailed));
+        return;
+      }
+      if (editingId) {
+        const edited = editingId;
+        setReferences((prev) =>
+          prev.map((r) => (r.id === edited ? { ...r, ...draft, relationship: draft.relationship || null } : r))
+        );
+      } else {
+        setReferences((prev) => [...prev, data.reference as PortalReference]);
+      }
+      setEditingId(null);
+      setDraft(null);
+    } catch {
+      setRefError(t.referenceSaveFailed);
+    } finally {
+      setRefBusyId(null);
+    }
+  };
+
+  const removeReference = async (id: string) => {
+    setRefError(null);
+    setRefBusyId(id);
+    try {
+      const res = await fetch(`/api/public/conversion/${token}/references`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setRefError(data.error ?? t.referenceSaveFailed);
+        return;
+      }
+      setReferences((prev) => prev.filter((r) => r.id !== id));
+      if (editingId === id) { setEditingId(null); setDraft(null); }
+    } catch {
+      setRefError(t.referenceSaveFailed);
+    } finally {
+      setRefBusyId(null);
+    }
+  };
+
   // DB-truth projection for the client-side guard pre-check (reuses the SAME
   // canAdvance() the server runs, so validation rules live in one place).
   const buildSnapshot = (): JourneySnapshot => ({
@@ -170,6 +260,7 @@ function ConversionPortalWizard({
       ? { communityName: form.communityName || null, sponsoringRabbi: form.sponsoringRabbi || null, personalStory: form.personalStory || null }
       : null,
     mandatoryChecklist: items.filter((i) => i.isMandatory).map((i) => ({ status: i.status })),
+    referenceCount: references.length,
   });
 
   // Persist the full shared form (every slice sends everything it knows, mirroring
@@ -302,6 +393,22 @@ function ConversionPortalWizard({
       )}
       {view === "WIZARD_BACKGROUND" && <BackgroundBody t={t} form={form} set={set} />}
       {view === "PERSONAL_STORY" && <StoryBody t={t} form={form} set={set} />}
+      {view === "WIZARD_REFERENCES" && (
+        <ReferencesBody
+          t={t}
+          references={references}
+          draft={draft}
+          setDraft={setDraftField}
+          editingId={editingId}
+          busyId={refBusyId}
+          error={refError}
+          onStartAdd={startAddReference}
+          onStartEdit={startEditReference}
+          onCancel={cancelReference}
+          onSave={saveReference}
+          onRemove={removeReference}
+        />
+      )}
       {view === "PENDING_DOCS" && (
         <DocumentsBody t={t} locale={locale} items={items} uploadingId={uploadingId} uploadError={uploadError} onUpload={triggerUpload} />
       )}

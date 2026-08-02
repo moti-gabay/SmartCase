@@ -4,13 +4,13 @@ import { cn, formatDate, calculateAge } from "@/lib/utils";
 import {
   portalDict, translateChecklistLabel, translateChecklistDescription, type PortalLocale,
 } from "@/lib/i18n/conversion-portal";
-import type { PortalCaseView, PortalChecklistItem, PortalActivityEntry, PortalActivityType } from "@/lib/queries";
+import type { PortalCaseView, PortalChecklistItem, PortalActivityEntry, PortalActivityType, PortalReference } from "@/lib/queries";
 import type { CaseStep } from "@/types";
-import { CASE_STEP_ORDER } from "@/lib/portal/journey";
+import { CASE_STEP_ORDER, MIN_REFERENCES } from "@/lib/portal/journey";
 import {
   BookOpen, ClipboardList, HeartHandshake, Users2, User, Phone, Mail, MapPin,
   Plus, X, Upload, CheckCircle2, AlertTriangle, Loader2, CreditCard, FileBadge,
-  Building2, Camera, FileText, ScrollText, ListChecks, CalendarClock, Sparkles,
+  Building2, Camera, FileText, ScrollText, ListChecks, CalendarClock, Sparkles, UserCheck,
 } from "lucide-react";
 
 // ── Shared form shape (owned by the orchestrator, threaded into each screen) ──
@@ -228,7 +228,145 @@ export function StoryBody({ t, form, set }: { t: Dict; form: PortalForm; set: Se
   );
 }
 
-// ── Screen 7: PENDING_DOCS ──
+// ── Screen 7: WIZARD_REFERENCES ──
+// Rows persist immediately through /references (they carry server ids), unlike
+// the other slices which batch into /submit on Continue.
+export interface ReferenceDraft {
+  fullName: string;
+  phone: string;
+  role: string;
+  relationship: string;
+}
+
+export function ReferencesBody({
+  t, references, draft, setDraft, editingId, busyId, error,
+  onStartAdd, onStartEdit, onCancel, onSave, onRemove,
+}: {
+  t: Dict;
+  references: PortalReference[];
+  draft: ReferenceDraft | null;
+  setDraft: (k: keyof ReferenceDraft, v: string) => void;
+  editingId: string | null;
+  busyId: string | null;
+  error: string | null;
+  onStartAdd: () => void;
+  onStartEdit: (r: PortalReference) => void;
+  onCancel: () => void;
+  onSave: () => void;
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <div className={card}>
+      <h1 className={heading}><UserCheck className="h-5 w-5 text-indigo-500" /> {t.referencesTitle}</h1>
+      <p className={introCls}>{t.referencesIntro}</p>
+
+      {error && (
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
+          <AlertTriangle className="h-4 w-4 shrink-0" /> {error}
+        </div>
+      )}
+
+      <div className="mb-4 flex flex-col gap-2.5">
+        {references.length === 0 && !draft && <p className="text-xs text-slate-400">{t.noReferences}</p>}
+        {references.map((r) => (
+          <div key={r.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-100 bg-white shadow-sm">
+              <UserCheck className="h-4 w-4 text-slate-500" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-slate-800">{r.fullName}</p>
+              <p className="text-xs text-slate-500">{r.role} · {r.phone}</p>
+              {r.relationship && <p className="mt-0.5 text-xs text-slate-400">{r.relationship}</p>}
+            </div>
+            <button
+              type="button"
+              onClick={() => onStartEdit(r)}
+              disabled={busyId !== null}
+              className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+            >
+              {t.editReference}
+            </button>
+            <button
+              type="button"
+              onClick={() => onRemove(r.id)}
+              disabled={busyId !== null}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50"
+              aria-label={t.removeReference}
+            >
+              {busyId === r.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {draft ? (
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div>
+              <label className={labelCls}>{t.referenceName}</label>
+              <input className={inputCls} value={draft.fullName} onChange={(e) => setDraft("fullName", e.target.value)} />
+            </div>
+            <div>
+              <label className={labelCls}>{t.referencePhone}</label>
+              <input className={inputCls} value={draft.phone} onChange={(e) => setDraft("phone", e.target.value)} />
+            </div>
+            <div>
+              <label className={labelCls}>{t.referenceRole}</label>
+              <input
+                className={inputCls}
+                placeholder={t.referenceRolePlaceholder}
+                value={draft.role}
+                onChange={(e) => setDraft("role", e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="mt-3">
+            <label className={labelCls}>{t.referenceRelationship}</label>
+            <input
+              className={inputCls}
+              placeholder={t.referenceRelationshipPlaceholder}
+              value={draft.relationship}
+              onChange={(e) => setDraft("relationship", e.target.value)}
+            />
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={busyId !== null}
+              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+            >
+              {busyId === (editingId ?? "__new__") && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {t.saveReference}
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={busyId !== null}
+              className="rounded-lg px-3 py-2 text-xs font-medium text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+            >
+              {t.cancelReference}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onStartAdd}
+          className="flex items-center gap-1 text-xs font-medium text-indigo-600 hover:underline"
+        >
+          <Plus className="h-3.5 w-3.5" /> {t.addReference}
+        </button>
+      )}
+
+      <p className="mt-4 text-xs text-slate-400">
+        {references.length}/{MIN_REFERENCES} {t.referencesCount}
+      </p>
+    </div>
+  );
+}
+
+// ── Screen 8: PENDING_DOCS ──
 export function DocumentsBody({ t, locale, items, uploadingId, uploadError, onUpload }: {
   t: Dict; locale: PortalLocale; items: PortalChecklistItem[];
   uploadingId: string | null; uploadError: string | null;

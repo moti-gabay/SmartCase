@@ -22,7 +22,12 @@ export async function POST(_req: Request, { params }: { params: Promise<{ token:
         portalStep: true,
         client: { select: { phone: true, email: true, addressCity: true } },
         conversionProfile: {
-          select: { communityName: true, sponsoringRabbi: true, personalStory: true },
+          select: {
+            communityName: true,
+            sponsoringRabbi: true,
+            personalStory: true,
+            _count: { select: { references: true } },
+          },
         },
         checklist: {
           where: { template: { isMandatory: true } },
@@ -44,6 +49,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ token:
       client: c.client,
       profile: c.conversionProfile,
       mandatoryChecklist: c.checklist,
+      referenceCount: c.conversionProfile?._count.references ?? 0,
     };
     const check = canAdvance(step, snapshot);
     if (!check.ok) {

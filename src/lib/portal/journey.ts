@@ -15,10 +15,16 @@ export const CASE_STEP_ORDER: CaseStep[] = [
   "WIZARD_FAMILY",
   "WIZARD_BACKGROUND",
   "PERSONAL_STORY",
+  "WIZARD_REFERENCES",
   "PENDING_DOCS",
   "SCHEDULE_MEETING",
   "TRACKING",
 ];
+
+// Minimum recommenders the client must save before leaving WIZARD_REFERENCES.
+// Two is the office's working rule (a community voice plus a rabbinic one);
+// change it here and the guard, the tests and the UI hint all follow.
+export const MIN_REFERENCES = 2;
 
 export function nextStep(step: CaseStep): CaseStep | null {
   const i = CASE_STEP_ORDER.indexOf(step);
@@ -48,6 +54,10 @@ export interface JourneySnapshot {
     personalStory: string | null;
   } | null;
   mandatoryChecklist: { status: DocumentStatus }[];
+  // Number of saved recommenders. A count is enough because the references
+  // route rejects incomplete rows on the way in — a persisted row is a valid
+  // one, so there is nothing further to re-validate here.
+  referenceCount: number;
 }
 
 export type AdvanceCheck = { ok: true } | { ok: false; reason: string };
@@ -83,6 +93,11 @@ export function canAdvance(step: CaseStep, s: JourneySnapshot): AdvanceCheck {
       return s.profile !== null && filled(s.profile.personalStory)
         ? { ok: true }
         : { ok: false, reason: "MISSING_PERSONAL_STORY" };
+
+    case "WIZARD_REFERENCES":
+      return s.referenceCount >= MIN_REFERENCES
+        ? { ok: true }
+        : { ok: false, reason: "MISSING_REFERENCES" };
 
     case "PENDING_DOCS":
       return s.mandatoryChecklist.every(
