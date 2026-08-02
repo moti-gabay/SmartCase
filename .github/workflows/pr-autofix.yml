@@ -1,0 +1,232 @@
+name: PR Auto-fix
+
+# Comment `@claude fix <what is wrong>` on a pull request to run the autofix
+# orchestrator (scripts/autofix) against that PR and push the resulting commit
+# to the PR's head branch.
+#
+# `issue_comment` always runs the workflow definition from the DEFAULT branch and
+# checks out the default branch by default, so the PR head ref is resolved via
+# the API and checked out explicitly below.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  # One auto-fix per PR at a time. Two concurrent runs would race on pushing the
+  # same head branch, and the loser's work would be silently lost to a reject.
+  group: pr-autofix-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  autofix:
+    # Gate order matters: cheapest checks first.
+    #   - issue.pull_request  → this is a PR, not a plain issue
+    #   - user.type != Bot    → never let this workflow's own comments retrigger it
+    #   - author_association  → "not a bot" is not authorization. Anyone with a
+    #                           GitHub account can comment on a public PR; without
+    #                           this, any of them could spend the API budget and
+    #                           push a commit to the branch.
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.comment.user.type != 'Bot' &&
+      contains(github.event.comment.body, '@claude fix') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Acknowledge the request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh api --silent \
+            "repos/$GITHUB_REPOSITORY/issues/comments/${{ github.event.comment.id }}/reactions" \
+            -f content=eyes || true
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body \
+            "🤖 Auto-fix started — [run #${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}). I'll report back here when it finishes."
+
+      - name: Resolve PR head ref
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          PR_JSON="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json headRefName,baseRefName,isCrossRepository,state)"
+
+          if [ "$(jq -r '.state' <<<"$PR_JSON")" != "OPEN" ]; then
+            echo "Error: PR #$PR_NUMBER is not open."
+            exit 1
+          fi
+
+          # Same refusal as claude-pr-review-and-fix.yml: `headRefName` on a fork
+          # PR names a branch in the FORK, which the checkout below would resolve
+          # against THIS repo — a fork PR from its own `main` would check out our
+          # `main` and the push step would commit straight onto it.
+          if [ "$(jq -r '.isCrossRepository' <<<"$PR_JSON")" != "false" ]; then
+            echo "Error: PR #$PR_NUMBER comes from a fork. Refusing — the head ref would resolve to a same-named branch in this repository."
+            exit 1
+          fi
+
+          jq -r '"head_ref=\(.headRefName)\nbase_ref=\(.baseRefName)"' <<<"$PR_JSON" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout PR head branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.head_ref }}
+          # Full history: the pipeline cuts its fix branch from origin/<default>
+          # and the harvest step cherry-picks across branches.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        # --legacy-peer-deps per .npmrc — @auth/prisma-adapter under-declares its
+        # Prisma 7 peer range.
+        run: npm ci --legacy-peer-deps
+
+      - name: Generate Prisma client
+        # The pipeline's verification gate runs `npm test` BEFORE `npm run build`,
+        # and only `build` triggers `prisma generate`. Without this, tests that
+        # import @/generated/prisma fail on a cold checkout.
+        run: npx prisma generate
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Configure git identity
+        run: |
+          git config user.name "claude-ai[bot]"
+          git config user.email "claude-ai[bot]@users.noreply.github.com"
+
+      - name: Run autofix orchestrator
+        id: autofix
+        continue-on-error: true
+        env:
+          # Spend ceiling read by pipeline.mjs. Note there is deliberately no
+          # AUTOFIX_MAX_TURNS: the Claude CLI has no --max-turns (see
+          # scripts/autofix/README.md), so budget + per-phase timeouts are the
+          # runaway-loop guards.
+          AUTOFIX_MAX_BUDGET_USD: "2.0"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          # Untrusted input. Passed through the environment and quoted as a single
+          # argv element — never interpolated into the script body, where a
+          # comment containing $(...) would execute on the runner.
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          set -o pipefail
+          # --yes    : no TTY here, so the interactive approval gate must be skipped
+          # --no-pr  : the pipeline's own PR/push is not wanted; the commit is
+          #            harvested onto the PR head branch instead
+          # --provider openai : the default (gemini) would need GEMINI_API_KEY
+          # --       : everything after is issue text, so a comment starting with
+          #            a dash is not parsed as a flag
+          npm run autofix -- --yes --no-pr --provider openai -- "$COMMENT_BODY" \
+            2>&1 | tee /tmp/autofix.log
+          # Outcome is judged by the harvest step (did a fix branch appear?), not
+          # by this exit code — the pipeline exits non-zero for both "review
+          # rejected the plan" and "no change was needed", which report the same
+          # way to the PR. Swallow it so the log is still reported.
+          echo "orchestrator exited $?"
+          exit 0
+
+      - name: Harvest the fix onto the PR branch
+        id: harvest
+        env:
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+        run: |
+          set -euo pipefail
+
+          # The pipeline commits onto its own `fix/slack-issue-<runId>` branch cut
+          # from origin/<default>. On a fresh checkout no such branch pre-exists,
+          # so any that is present now was created by this run. Its absence means
+          # the pipeline aborted before Phase 4 (review rejected, tests failed,
+          # forbidden paths, or no changes produced).
+          FIX_BRANCH="$(git branch --list 'fix/slack-issue-*' --format='%(refname:short)' | head -n1)"
+          if [ -z "$FIX_BRANCH" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git checkout --force "$HEAD_REF"
+          # -n stages without committing, so the `git status --porcelain` check
+          # below is meaningful and the commit carries the requested message.
+          # A conflict is expected when the PR branch has diverged from the base
+          # the fix was planned against — report it rather than pushing a mess.
+          if ! git cherry-pick -n "$FIX_BRANCH"; then
+            git cherry-pick --abort || git reset --hard HEAD
+            echo "changed=conflict" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git add -A
+          git commit -m "fix(pr): auto-fix requested by @${COMMENT_AUTHOR}"
+          git push origin "HEAD:${HEAD_REF}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Report result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          CHANGED: ${{ steps.harvest.outputs.changed }}
+          SHA: ${{ steps.harvest.outputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # Last 40 lines of the orchestrator log give the failing phase without
+          # pasting a full transcript (which can contain the whole plan) into the PR.
+          TAIL="$(tail -n 40 /tmp/autofix.log 2>/dev/null || echo '(no output captured)')"
+
+          case "$CHANGED" in
+            true)
+              BODY="✅ **Auto-fix applied** in \`${SHA}\` and pushed to this branch.
+
+          The orchestrator's plan was independently reviewed (VERDICT: PASS) and \`npm test\` + \`npm run build\` passed before the commit was made. Please still review the diff.
+
+          [Run log](${RUN_URL})"
+              ;;
+            conflict)
+              BODY="⚠️ **Auto-fix produced a change, but it would not apply cleanly.**
+
+          The fix was planned against the base branch and conflicts with this PR's head. Rebase the PR onto the base branch and try again.
+
+          [Run log](${RUN_URL})"
+              ;;
+            false)
+              BODY="ℹ️ **No changes were produced.**
+
+          The orchestrator ran but did not reach the commit phase — the plan was rejected on review, the verification gate failed, or it concluded no code change was needed.
+
+          <details><summary>Last lines of the run</summary>
+
+          \`\`\`
+          ${TAIL}
+          \`\`\`
+          </details>
+
+          [Run log](${RUN_URL})"
+              ;;
+            *)
+              BODY="❌ **Auto-fix failed before it could run.** See the [run log](${RUN_URL})."
+              ;;
+          esac
+
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
