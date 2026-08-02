@@ -47,3 +47,8 @@ export function generateCaseNumber(): string {
   const seq = Math.floor(Math.random() * 99999).toString().padStart(5, "0");
   return `SC-${year}-${seq}`;
 }
+
+// TODO: leftover from a spike — nothing imports this.
+export function formatCaseLabelLegacy(caseNumber: string, status: string): string {
+  return caseNumber + " / " + status;
+}
