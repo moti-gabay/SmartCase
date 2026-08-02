@@ -164,6 +164,17 @@ enum CaseStep {
   TRACKING           // terminal passive milestone view
 }
 
+// Server-side transcription state of a PERSONAL_STORY audio recording. Null (no
+// value) means "no audio" — the field only carries a value once a recording is
+// confirmed. Not a labeled status chip in the portal, so no entry in
+// src/lib/constants.ts; the backoffice renders it from the enum directly.
+enum TranscriptionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 // AI assistant chat message author. Internal to the chat feature — not rendered
 // as a labeled status chip, so it has no entry in src/lib/constants.ts.
 enum ChatRole {
@@ -512,6 +523,18 @@ model ConversionProfile {
   courtName        String?
   additionalNotes  String?   @db.Text
   personalStory    String?   @db.Text
+
+  // PERSONAL_STORY audio alternative (Phase 5). storyAudioKey is the canonical
+  // handle — the R2 object key; playback always goes through a short-lived
+  // presigned GET derived from it. storyAudioUrl is the durable (still private,
+  // signature-required) object URL, kept for staff tooling / audit trails.
+  // Both null until a recording is confirmed; re-recording replaces them and
+  // deletes the previous object.
+  storyAudioKey            String?
+  storyAudioUrl            String?
+  storyTranscript          String?              @db.Text
+  storyTranscriptionStatus TranscriptionStatus?
+
   submittedAt      DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
