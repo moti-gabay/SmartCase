@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { auth } from "@/../auth";
 import { prisma } from "@/lib/prisma";
 import { presignDownload } from "@/core/storage/s3-storage";
@@ -34,10 +35,18 @@ const FILE_ACTIVATION_POLLS = 10;
 const FILE_ACTIVATION_INTERVAL_MS = 1000;
 
 // Real ports: Prisma for the queue, R2 for the bytes, Gemini for the words.
-const ports: TranscriptionPorts = {
+// caseId scopes the queue to one case — that is what the staff "transcribe now"
+// button needs. Without it the button would run the global batch and could
+// report success having transcribed three OTHER cases, leaving the one on
+// screen untouched.
+const buildPorts = (caseId?: string): TranscriptionPorts => ({
   listPending: async (limit) => {
     const rows = await prisma.conversionProfile.findMany({
-      where: { storyTranscriptionStatus: "PENDING", storyAudioKey: { not: null } },
+      where: {
+        storyTranscriptionStatus: "PENDING",
+        storyAudioKey: { not: null },
+        ...(caseId ? { caseId } : {}),
+      },
       select: { id: true, caseId: true, storyAudioKey: true },
       orderBy: { updatedAt: "asc" },
       take: limit,
@@ -143,13 +152,43 @@ const ports: TranscriptionPorts = {
   },
 
   logError: (message, err) => console.error(message, err),
-};
+});
+
+// Optional targeting for the manual staff trigger. The cron path sends no body.
+const targetSchema = z.object({ caseId: z.string().min(1) }).partial();
 
 async function handle(req: Request) {
   if (!(await authorize(req))) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
 
+  // GET (cron) has no body; a malformed body simply means "no target".
+  const parsed = targetSchema.safeParse(
+    req.method === "POST" ? await req.json().catch(() => ({})) : {}
+  );
+  const caseId = parsed.success ? parsed.data.caseId : undefined;
+
   try {
-    const result = await runTranscriptionBatch(ports, TRANSCRIPTION_BATCH_SIZE);
+    if (caseId) {
+      // Retry semantics: a FAILED row is put back on the queue so the very next
+      // step can claim it. PENDING rows are already claimable and left alone.
+      await prisma.conversionProfile.updateMany({
+        where: { caseId, storyTranscriptionStatus: "FAILED" },
+        data: { storyTranscriptionStatus: "PENDING" },
+      });
+    }
+
+    const result = await runTranscriptionBatch(
+      buildPorts(caseId),
+      caseId ? 1 : TRANSCRIPTION_BATCH_SIZE
+    );
+
+    // A targeted run that matched nothing means the row was not in a
+    // transcribable state — most likely already PROCESSING under the cron.
+    if (caseId && result.processed === 0) {
+      return NextResponse.json(
+        { error: "אין הקלטה הממתינה לתמלול בתיק זה", code: "NOTHING_TO_TRANSCRIBE" },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(result);
   } catch (err) {
     console.error("[ai/transcribe]", err);

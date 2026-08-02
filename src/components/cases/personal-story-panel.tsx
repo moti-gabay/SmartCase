@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { TRANSCRIPTION_STATUS_LABELS } from "@/lib/constants";
+import { TRANSCRIPTION_STATUS_LABELS, isTranscribableOnDemand } from "@/lib/constants";
 import type { TranscriptionStatus } from "@/types";
-import { Play, Pause, Mic, FileText, Loader2, AlertTriangle } from "lucide-react";
+import { Play, Pause, Mic, FileText, Loader2, AlertTriangle, Sparkles } from "lucide-react";
 
 // Staff-side view of the client's personal story: the written text, the voice
 // recording, and whatever the transcription pipeline has produced so far.
@@ -36,7 +37,65 @@ export function PersonalStoryPanel({
         <>
           <AudioPlayer caseId={caseId} />
           <TranscriptBlock transcript={transcript} status={transcriptionStatus} />
+          {isTranscribableOnDemand(transcriptionStatus) && (
+            <TranscribeNowButton caseId={caseId} status={transcriptionStatus} />
+          )}
         </>
+      )}
+    </div>
+  );
+}
+
+// Manual trigger, for when the office does not want to wait for the daily cron
+// (or is retrying a FAILED transcription). Targets THIS case: the request
+// carries the caseId, and the route scopes the batch to it — otherwise a click
+// here could transcribe unrelated cases and report success for this one.
+function TranscribeNowButton({ caseId, status }: { caseId: string; status: TranscriptionStatus }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
+
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/ai/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caseId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "התמלול נכשל");
+      // A 200 only means the batch ran — the recording itself may still have
+      // failed, and reporting that as success would be a lie on screen.
+      if (data.failed > 0) throw new Error("תמלול ההקלטה נכשל, אפשר לנסות שוב");
+
+      // The transcript lives in the server component, so the panel only shows
+      // the result after a refresh.
+      startTransition(() => router.refresh());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "התמלול נכשל");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={run}
+        disabled={busy}
+        className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-60 print:hidden"
+      >
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+        {busy ? "מתמלל..." : status === "FAILED" ? "נסה לתמלל שוב" : "תמלל כעת"}
+      </button>
+      {error && (
+        <div className="mt-2 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
+        </div>
       )}
     </div>
   );

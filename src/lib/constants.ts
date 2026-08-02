@@ -158,6 +158,22 @@ export const TRANSCRIPTION_STATUS_LABELS: Record<string, string> = {
   FAILED:     "התמלול נכשל",
 };
 
+// Whether staff may ask for a recording to be (re-)transcribed now. PENDING is
+// simply "not picked up yet"; FAILED is retryable because the usual causes are
+// transient (a model error, a timeout). PROCESSING is deliberately excluded — a
+// run is already in flight — and COMPLETED needs no action. Shared by the
+// button's visibility check and the route's requeue so the two cannot disagree.
+// Lives here rather than in src/lib/ai/transcription.ts because that module
+// reaches node:crypto through the storage layer and so cannot be imported by a
+// client component.
+// Typed as a guard so callers narrow the nullable status to the two states the
+// trigger accepts, instead of re-asserting it at the call site.
+export function isTranscribableOnDemand(
+  status: string | null | undefined
+): status is "PENDING" | "FAILED" {
+  return status === "PENDING" || status === "FAILED";
+}
+
 export const NOTE_TYPE_LABELS: Record<string, string> = {
   INTERNAL:          "הערה פנימית",
   CALL_LOG:          "שיחת טלפון",
