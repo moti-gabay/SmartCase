@@ -158,6 +158,7 @@ enum CaseStep {
   WIZARD_FAMILY      // spouse/children slice
   WIZARD_BACKGROUND  // community/rabbi/court slice
   PERSONAL_STORY     // free-text story (audio module later)
+  WIZARD_REFERENCES  // structured recommenders (name, phone, role)
   PENDING_DOCS       // mandatory checklist uploads
   SCHEDULE_MEETING   // staff-driven until the Smart Scheduling module lands
   TRACKING           // terminal passive milestone view
@@ -350,6 +351,7 @@ model Document {
   uploadedBy    User?           @relation("DocumentUploader", fields: [uploadedById], references: [id])
   reviewedBy    User?           @relation("DocumentReviewer", fields: [reviewedById], references: [id])
   checklistItem CaseChecklist[]
+  references    ConversionReference[]
 
   @@index([caseId])
   @@index([status])
@@ -514,8 +516,9 @@ model ConversionProfile {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  case     Case              @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  children ConversionChild[]
+  case       Case                  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  children   ConversionChild[]
+  references ConversionReference[]
 
   @@map("conversion_profiles")
 }
@@ -530,6 +533,33 @@ model ConversionChild {
 
   @@index([conversionProfileId])
   @@map("conversion_children")
+}
+
+// Recommenders vouching for the candidate (WIZARD_REFERENCES step). Client-owned
+// rows: created/edited/removed from the public portal, so every mutation must
+// re-derive the owning profile from the portal token — see
+// src/app/api/public/conversion/[token]/references/route.ts.
+model ConversionReference {
+  id                  String   @id @default(cuid())
+  conversionProfileId String
+  fullName            String
+  phone               String
+  // Free text (e.g. "רב הקהילה") rather than an enum — the office has no fixed
+  // taxonomy of recommender roles, and a wrong enum would block a real client.
+  role                String
+  // How the recommender knows the candidate; optional context for the office.
+  relationship String?
+  // Optional supporting letter. onDelete: SetNull — deleting the underlying
+  // Document must never cascade away the recommender's contact details.
+  documentId   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  conversionProfile ConversionProfile @relation(fields: [conversionProfileId], references: [id], onDelete: Cascade)
+  document          Document?         @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@index([conversionProfileId])
+  @@map("conversion_references")
 }
 
 // ─── AI Assistant Chat (staff-only, read-only tools) ──────────────────────────

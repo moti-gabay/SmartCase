@@ -143,6 +143,7 @@ export const CASE_STEP_LABELS: Record<string, string> = {
   WIZARD_FAMILY:     "משפחה",
   WIZARD_BACKGROUND: "רקע קהילתי",
   PERSONAL_STORY:    "הסיפור האישי",
+  WIZARD_REFERENCES: "ממליצים",
   PENDING_DOCS:      "העלאת מסמכים",
   SCHEDULE_MEETING:  "קביעת פגישה",
   TRACKING:          "מעקב תיק",
