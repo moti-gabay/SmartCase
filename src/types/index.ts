@@ -226,6 +226,16 @@ export interface ConversionChildDetail {
   dateOfBirth?: string | null;
 }
 
+// A recommender as submitted by the client through the portal
+// (CaseStep.WIZARD_REFERENCES). Read-only in the backoffice.
+export interface ConversionReferenceDetail {
+  id: string;
+  fullName: string;
+  phone: string;
+  role: string;
+  relationship?: string | null;
+}
+
 export interface ConversionProfileDetail {
   spouseFullName?: string | null;
   spouseNationalId?: string | null;
@@ -236,6 +246,7 @@ export interface ConversionProfileDetail {
   additionalNotes?: string | null;
   submittedAt?: string | null;
   children: ConversionChildDetail[];
+  references: ConversionReferenceDetail[];
 }
 
 export interface StatusHistoryEntry {

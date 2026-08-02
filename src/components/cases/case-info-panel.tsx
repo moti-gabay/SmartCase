@@ -152,6 +152,25 @@ export function CaseInfoPanel({ caseDetail }: CaseInfoPanelProps) {
                 </ul>
               </div>
             )}
+            {caseDetail.conversionProfile.references.length > 0 && (
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">ממליצים</p>
+                <ul className="mt-1 flex flex-col gap-1.5">
+                  {caseDetail.conversionProfile.references.map((ref) => (
+                    <li key={ref.id}>
+                      <p className="text-sm font-medium text-slate-800">
+                        {ref.fullName}
+                        <span className="text-slate-400"> · {ref.role}</span>
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        <a href={`tel:${ref.phone}`} className="hover:underline" dir="ltr">{ref.phone}</a>
+                        {ref.relationship && <span className="text-slate-400"> · {ref.relationship}</span>}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {caseDetail.conversionProfile.submittedAt && (
               <Row icon={Clock} label="עודכן על ידי הלקוח" value={formatDate(caseDetail.conversionProfile.submittedAt)} />
             )}

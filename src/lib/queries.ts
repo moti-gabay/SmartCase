@@ -318,7 +318,9 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
       tasks: { include: { assignedTo: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
       statusHistory: { include: { changedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
       activities: { include: { user: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
-      conversionProfile: { include: { children: true } },
+      conversionProfile: {
+        include: { children: true, references: { orderBy: { createdAt: "asc" } } },
+      },
     },
   });
   if (!c) return null;
@@ -482,6 +484,13 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
             id: ch.id,
             fullName: ch.fullName,
             dateOfBirth: iso(ch.dateOfBirth),
+          })),
+          references: c.conversionProfile.references.map((r) => ({
+            id: r.id,
+            fullName: r.fullName,
+            phone: r.phone,
+            role: r.role,
+            relationship: r.relationship,
           })),
         }
       : null,
