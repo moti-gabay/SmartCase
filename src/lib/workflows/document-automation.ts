@@ -25,6 +25,8 @@ export const HEARING_LOCATION = "בית דין";
 
 export const HEARING_TASK_TITLE = "דיון בבית דין";
 
+export const HEARING_DURATION_MINUTES = 90;
+
 // Stable, label-derived title. Also the dedupe key against already-open tasks,
 // which is why it must be a pure function of the enum value.
 export function buildMissingDocumentTaskTitle(documentType: DocumentType): string {

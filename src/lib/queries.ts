@@ -17,6 +17,7 @@ import type {
   DocumentStatus,
 } from "@/types";
 import { parseCaseTags } from "@/types/case-tags";
+import { SLOT_MIN_LEAD_MS, selectableSlots } from "@/lib/portal/journey";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -682,6 +683,21 @@ export interface PortalCaseView {
   } | null;
   checklist: PortalChecklistItem[];
   activities: PortalActivityEntry[];
+  // Smart Scheduling. Server-rendered so SCHEDULE_MEETING paints with real
+  // availability instead of a spinner; the portal re-fetches /slots after each
+  // booking attempt, which is the only moment this list can have gone stale.
+  availableSlots: PortalSlotView[];
+  bookedSlot: PortalSlotView | null;
+}
+
+// Public projection of a MeetingSlot. Carries no bookedCaseId — a taken slot is
+// simply absent from the list, so the portal can never enumerate which other
+// cases the office is meeting.
+export interface PortalSlotView {
+  id: string;
+  startsAt: string;
+  durationMinutes: number;
+  location: string | null;
 }
 
 export async function getPortalCaseByToken(token: string): Promise<PortalCaseView | null> {
@@ -716,11 +732,27 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
         orderBy: { createdAt: "desc" },
         take: 20,
       },
+      meetingSlot: { select: { id: true, startsAt: true, durationMinutes: true, location: true } },
     },
   });
 
   if (!c) return null;
   if (c.clientPortalTokenExpiresAt && c.clientPortalTokenExpiresAt < new Date()) return null;
+
+  // Pre-filtered in SQL on the cheap bounds; selectableSlots() then applies the
+  // exact same rule the booking route enforces, so the rendered list and the
+  // server-side guard can never disagree.
+  const now = new Date();
+  const slotRows = await prisma.meetingSlot.findMany({
+    where: {
+      isPublished: true,
+      bookedCaseId: null,
+      startsAt: { gte: new Date(now.getTime() + SLOT_MIN_LEAD_MS) },
+    },
+    select: { id: true, startsAt: true, durationMinutes: true, location: true },
+    orderBy: { startsAt: "asc" },
+    take: 60,
+  });
 
   return {
     id: c.id,
@@ -777,6 +809,25 @@ export async function getPortalCaseByToken(token: string): Promise<PortalCaseVie
       type: a.type as PortalActivityType,
       createdAt: a.createdAt.toISOString(),
     })),
+    availableSlots: selectableSlots(
+      slotRows.map((r) => ({
+        id: r.id,
+        startsAt: r.startsAt.toISOString(),
+        durationMinutes: r.durationMinutes,
+        location: r.location,
+        isPublished: true,
+        isBooked: false,
+      })),
+      now,
+    ).map(({ id, startsAt, durationMinutes, location }) => ({ id, startsAt, durationMinutes, location })),
+    bookedSlot: c.meetingSlot
+      ? {
+          id: c.meetingSlot.id,
+          startsAt: c.meetingSlot.startsAt.toISOString(),
+          durationMinutes: c.meetingSlot.durationMinutes,
+          location: c.meetingSlot.location,
+        }
+      : null,
   };
 }
 

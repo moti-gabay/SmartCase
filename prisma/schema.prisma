@@ -146,6 +146,7 @@ enum ActivityType {
   DOCUMENT_REJECTED
   STEP_CHANGED
   AI_CALL_SUMMARY
+  MEETING_SCHEDULED
 }
 
 // Client-portal journey state machine (Phase 5 wizard). Ordered; transitions are
@@ -160,7 +161,7 @@ enum CaseStep {
   PERSONAL_STORY     // free-text story (audio module later)
   WIZARD_REFERENCES  // structured recommenders (name, phone, role)
   PENDING_DOCS       // mandatory checklist uploads
-  SCHEDULE_MEETING   // staff-driven until the Smart Scheduling module lands
+  SCHEDULE_MEETING   // client books a published slot (Smart Scheduling)
   TRACKING           // terminal passive milestone view
 }
 
@@ -308,6 +309,7 @@ model Case {
   letters           GeneratedLetter[]
   conversionProfile ConversionProfile?
   activities        CaseActivity[]
+  meetingSlot       MeetingSlot?
 
   @@index([clientId])
   @@index([assignedAgentId])
@@ -487,6 +489,33 @@ model CaseActivity {
 
   @@index([caseId])
   @@map("case_activities")
+}
+
+// ─── Meeting Slot (Smart Scheduling) ──────────────────────────────────────────
+//
+// Office-published availability. A slot is bookable while isPublished is true
+// and bookedCaseId is null; booking sets both bookedCaseId and bookedAt in a
+// single status-guarded updateMany, so two clients racing for the last slot
+// cannot both win. bookedCaseId is unique, which is also what enforces "one
+// meeting per case" — rebooking releases the previous slot first.
+model MeetingSlot {
+  id              String    @id @default(cuid())
+  startsAt        DateTime
+  durationMinutes Int       @default(45)
+  // Free text ("משרד המשרד, רחוב הרצל 12" / "שיחת וידאו") — the office has no
+  // fixed set of locations, and an enum would block a legitimate one.
+  location        String?
+  // Unpublishing hides a slot from the portal without deleting history.
+  isPublished     Boolean   @default(true)
+  bookedCaseId    String?   @unique
+  bookedAt        DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  bookedCase Case? @relation(fields: [bookedCaseId], references: [id], onDelete: SetNull)
+
+  @@index([startsAt])
+  @@map("meeting_slots")
 }
 
 // ─── Generated Letter (AI drafts) ───────────────────────────────────────────────

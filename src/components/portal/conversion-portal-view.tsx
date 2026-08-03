@@ -8,8 +8,8 @@ import type { CaseStep } from "@/types";
 import { LanguageSwitcher } from "@/components/portal/language-switcher";
 import {
   WizardProgress, WelcomeBody, OverviewBody, PersonalBody, FamilyBody, BackgroundBody,
-  StoryBody, ReferencesBody, DocumentsBody, PassiveBody,
-  type PortalForm, type ChildRow, type ReferenceDraft,
+  StoryBody, ReferencesBody, DocumentsBody, SchedulingBody, PassiveBody,
+  type PortalForm, type ChildRow, type ReferenceDraft, type PortalSlot,
 } from "@/components/portal/portal-screens";
 import { Scale, ShieldAlert, Loader2, ArrowLeft } from "lucide-react";
 
@@ -176,6 +176,11 @@ function ConversionPortalWizard({
   const [refBusyId, setRefBusyId] = useState<string | null>(null);
   const [refError, setRefError] = useState<string | null>(null);
 
+  // Mirrors the case's booked slot so the SCHEDULE_MEETING guard can pre-check
+  // client-side against the same rule the server enforces. Owned here (not in
+  // SchedulingBody) because the nav's Continue button depends on it.
+  const [bookedSlot, setBookedSlot] = useState<PortalSlot | null>(caseView.bookedSlot);
+
   const setDraftField = (k: keyof ReferenceDraft, v: string) =>
     setDraft((d) => (d ? { ...d, [k]: v } : d));
 
@@ -271,6 +276,7 @@ function ConversionPortalWizard({
       : null,
     mandatoryChecklist: items.filter((i) => i.isMandatory).map((i) => ({ status: i.status })),
     referenceCount: references.length,
+    hasBookedMeeting: bookedSlot !== null,
   });
 
   // Persist the full shared form (every slice sends everything it knows, mirroring
@@ -379,7 +385,9 @@ function ConversionPortalWizard({
     }
   };
 
-  const isPassive = view === "SCHEDULE_MEETING" || view === "TRACKING";
+  // SCHEDULE_MEETING used to sit here too; it became interactive when Smart
+  // Scheduling gave the client a way to complete it. TRACKING stays terminal.
+  const isPassive = view === "TRACKING";
   const canBack = CASE_STEP_ORDER.indexOf(view) > 0 && !isPassive;
   const primaryLabel =
     view === "WELCOME" ? t.navStart : view === "PROCESS_OVERVIEW" ? t.navAcknowledge : t.navContinue;
@@ -433,6 +441,17 @@ function ConversionPortalWizard({
       )}
       {view === "PENDING_DOCS" && (
         <DocumentsBody t={t} locale={locale} items={items} uploadingId={uploadingId} uploadError={uploadError} onUpload={triggerUpload} />
+      )}
+      {view === "SCHEDULE_MEETING" && (
+        <SchedulingBody
+          t={t}
+          locale={locale}
+          token={token}
+          honeypot={honeypot}
+          initialAvailable={caseView.availableSlots}
+          initialBooked={caseView.bookedSlot}
+          onBooked={setBookedSlot}
+        />
       )}
       {isPassive && <PassiveBody t={t} locale={locale} step={view} activities={caseView.activities} />}
 

@@ -642,7 +642,160 @@ function PublicTimeline({ t, locale, activities }: {
   );
 }
 
-// ── SCHEDULE_MEETING / TRACKING: passive holding views (staff-driven / terminal) ──
+// ── Screen 9: SCHEDULE_MEETING ──
+//
+// The client picks from real office availability. The list is fetched (never
+// passed down from the page) because slots go stale the moment another client
+// books one, and it is re-fetched after every attempt so a 409 immediately shows
+// an accurate list rather than the one that just lost the race.
+
+export interface PortalSlot {
+  id: string;
+  startsAt: string;
+  durationMinutes: number;
+  location: string | null;
+}
+
+// Locale-aware, and explicitly NOT hand-formatted: Hebrew, English and French
+// each want a different day/month order, and Intl already knows all three.
+function formatSlotWhen(iso: string, locale: PortalLocale): string {
+  return new Date(iso).toLocaleString(locale, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function SchedulingBody({ t, locale, token, honeypot, initialAvailable, initialBooked, onBooked }: {
+  t: Dict;
+  locale: PortalLocale;
+  token: string;
+  honeypot: string;
+  initialAvailable: PortalSlot[];
+  initialBooked: PortalSlot | null;
+  onBooked: (booked: PortalSlot | null) => void;
+}) {
+  // Seeded from the server render, so this screen paints with real availability
+  // and never needs a fetch-on-mount effect. It re-syncs from /slots after every
+  // booking attempt — the only moment the list can have gone stale under us.
+  const [available, setAvailable] = useState<PortalSlot[]>(initialAvailable);
+  const [booked, setBooked] = useState<PortalSlot | null>(initialBooked);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Set once the client asks to change an already-booked time, so the list
+  // reappears without losing the booking until a new one actually succeeds.
+  const [changing, setChanging] = useState(false);
+
+  const refresh = async () => {
+    try {
+      const res = await fetch(`/api/public/conversion/${token}/slots`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setAvailable(data.available ?? []);
+      setBooked(data.booked ?? null);
+      onBooked(data.booked ?? null);
+    } catch {
+      // A failed refresh leaves the last known list on screen; the booking
+      // itself already succeeded or failed on its own terms.
+    }
+  };
+
+  const book = async (slotId: string) => {
+    setError(null);
+    setBusyId(slotId);
+    try {
+      const res = await fetch(`/api/public/conversion/${token}/book`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slotId, honeypot }),
+      });
+      if (res.status === 409) {
+        setError(t.scheduleTaken);
+        await refresh(); // the list that lost the race is worthless — replace it
+        return;
+      }
+      if (!res.ok) {
+        setError(t.scheduleFailed);
+        return;
+      }
+      const data = await res.json();
+      setBooked(data.booked);
+      onBooked(data.booked);
+      setChanging(false);
+      await refresh();
+    } catch {
+      setError(t.scheduleFailed);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const showList = !booked || changing;
+
+  return (
+    <div className={card}>
+      <h1 className={heading}><CalendarClock className="h-5 w-5 text-indigo-500" /> {t.scheduleTitle}</h1>
+      <p className={introCls}>{t.scheduleBody}</p>
+
+      {booked && (
+        <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+          <p className="mb-1 flex items-center gap-2 text-xs font-semibold text-emerald-700">
+            <CheckCircle2 className="h-4 w-4" /> {t.scheduleBooked}
+          </p>
+          <p className="text-sm font-medium text-slate-900">{formatSlotWhen(booked.startsAt, locale)}</p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            {booked.durationMinutes} {t.scheduleMinutes}
+            {booked.location ? ` · ${booked.location}` : ""}
+          </p>
+          {!changing && (
+            <button
+              onClick={() => setChanging(true)}
+              className="mt-3 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+            >
+              {t.scheduleChange}
+            </button>
+          )}
+        </div>
+      )}
+
+      {showList && available.length === 0 && (
+        <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">{t.scheduleEmpty}</p>
+      )}
+
+      {showList && available.length > 0 && (
+        <ul className="space-y-2">
+          {available.map((slot) => (
+            <li key={slot.id}>
+              <button
+                onClick={() => book(slot.id)}
+                disabled={busyId !== null}
+                className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 text-start hover:border-indigo-300 hover:bg-indigo-50 disabled:opacity-60"
+              >
+                <span>
+                  <span className="block text-sm font-medium text-slate-900">{formatSlotWhen(slot.startsAt, locale)}</span>
+                  <span className="block text-xs text-slate-500">
+                    {slot.durationMinutes} {t.scheduleMinutes}
+                    {slot.location ? ` · ${slot.location}` : ""}
+                  </span>
+                </span>
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600">
+                  {busyId === slot.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {t.scheduleConfirm}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {error && <p className="mt-4 text-sm font-medium text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+// ── TRACKING: passive terminal view ──
 export function PassiveBody({ t, locale, step, activities }: {
   t: Dict; locale: PortalLocale; step: CaseStep; activities: PortalActivityEntry[];
 }) {

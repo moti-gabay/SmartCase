@@ -28,5 +28,6 @@ ALTER TABLE public.generated_letters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.conversion_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.conversion_children ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.conversion_references ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.meeting_slots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;

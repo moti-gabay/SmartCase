@@ -34,6 +34,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ token:
           where: { template: { isMandatory: true } },
           select: { status: true },
         },
+        // Presence is the entire guard for SCHEDULE_MEETING — the slot's own
+        // validity was enforced by the booking route when it was claimed.
+        meetingSlot: { select: { id: true } },
       },
     });
     if (!c) return NextResponse.json({ error: "קישור לא תקין או שפג תוקפו" }, { status: 404 });
@@ -41,7 +44,10 @@ export async function POST(_req: Request, { params }: { params: Promise<{ token:
     const step = c.portalStep as CaseStep;
     if (!isClientAdvanceable(step)) {
       return NextResponse.json(
-        { error: "לא ניתן להתקדם בשלב זה", code: step === "TRACKING" ? "JOURNEY_COMPLETE" : "STAFF_ONLY_TRANSITION" },
+        // TRACKING is now the only non-advanceable step (SCHEDULE_MEETING became
+        // client-advanceable when Smart Scheduling gave the client a way to
+        // complete it themselves).
+        { error: "לא ניתן להתקדם בשלב זה", code: "JOURNEY_COMPLETE" },
         { status: 409 }
       );
     }
@@ -51,6 +57,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ token:
       profile: c.conversionProfile,
       mandatoryChecklist: c.checklist,
       referenceCount: c.conversionProfile?._count.references ?? 0,
+      hasBookedMeeting: c.meetingSlot !== null,
     };
     const check = canAdvance(step, snapshot);
     if (!check.ok) {

@@ -32,11 +32,53 @@ export function nextStep(step: CaseStep): CaseStep | null {
   return CASE_STEP_ORDER[i + 1];
 }
 
-// SCHEDULE_MEETING is staff-driven until the Smart Scheduling module lands;
-// TRACKING is terminal. Everything else the client may advance out of (once
-// its guard passes).
+// TRACKING is terminal — everything else the client may advance out of once its
+// guard passes. SCHEDULE_MEETING used to be staff-driven too; it became
+// client-advanceable when Smart Scheduling shipped and the client gained a way
+// to complete it themselves (booking a slot).
 export function isClientAdvanceable(step: CaseStep): boolean {
-  return step !== "SCHEDULE_MEETING" && step !== "TRACKING";
+  return step !== "TRACKING";
+}
+
+// How far ahead a slot must be for a client to still book it. The office needs
+// working notice to prepare a file, and a "book the meeting starting in ten
+// minutes" button is a support call waiting to happen. One rule, one place.
+export const SLOT_MIN_LEAD_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Serializable projection of a MeetingSlot — ISO strings, not Date objects, so
+// the same value crosses the server/client boundary and the same predicate runs
+// on both sides (the portal filters for display, the route re-checks on booking:
+// the client's list can be minutes stale, and only the server's answer counts).
+export interface SchedulableSlot {
+  id: string;
+  startsAt: string;
+  durationMinutes: number;
+  location: string | null;
+  isPublished: boolean;
+  isBooked: boolean;
+}
+
+export function isSlotSelectable(
+  slot: SchedulableSlot,
+  now: Date,
+  leadMs: number = SLOT_MIN_LEAD_MS
+): boolean {
+  if (!slot.isPublished || slot.isBooked) return false;
+  const startsAt = new Date(slot.startsAt).getTime();
+  if (!Number.isFinite(startsAt)) return false; // unparseable date — never offer it
+  return startsAt - now.getTime() >= leadMs;
+}
+
+// Bookable slots, soonest first. Sorting here (rather than in the query) keeps
+// the order identical wherever the list is built.
+export function selectableSlots(
+  slots: SchedulableSlot[],
+  now: Date,
+  leadMs: number = SLOT_MIN_LEAD_MS
+): SchedulableSlot[] {
+  return slots
+    .filter((slot) => isSlotSelectable(slot, now, leadMs))
+    .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
 }
 
 // Minimal DB-truth projection the guards need. profile is null until the first
@@ -62,6 +104,9 @@ export interface JourneySnapshot {
   // route rejects incomplete rows on the way in — a persisted row is a valid
   // one, so there is nothing further to re-validate here.
   referenceCount: number;
+  // True once this case holds a booked slot. Presence is the whole guard — the
+  // slot's own validity was enforced when it was booked.
+  hasBookedMeeting: boolean;
 }
 
 export type AdvanceCheck = { ok: true } | { ok: false; reason: string };
@@ -112,10 +157,13 @@ export function canAdvance(step: CaseStep, s: JourneySnapshot): AdvanceCheck {
         ? { ok: true }
         : { ok: false, reason: "MISSING_MANDATORY_DOCUMENTS" };
 
-    // Not client-advanceable — routes reject before reaching here, but keep the
-    // machine total so a direct call is still safe.
     case "SCHEDULE_MEETING":
-      return { ok: false, reason: "STAFF_ONLY_TRANSITION" };
+      return s.hasBookedMeeting
+        ? { ok: true }
+        : { ok: false, reason: "MEETING_NOT_SCHEDULED" };
+
+    // Terminal — the route rejects before reaching here, but keep the machine
+    // total so a direct call is still safe.
     case "TRACKING":
       return { ok: false, reason: "JOURNEY_COMPLETE" };
   }
