@@ -2,7 +2,9 @@
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/header";
+import { TaskEditModal } from "@/components/tasks/task-edit-modal";
 import { Button } from "@/components/ui/button";
 import { PriorityBadge } from "@/components/ui/badge";
 import { createTask, toggleTaskStatus } from "@/lib/actions";
@@ -11,7 +13,7 @@ import { PRIORITY_LABELS } from "@/lib/constants";
 import type { TaskListItem, UserSummary, Priority } from "@/types";
 import type { CaseOption } from "@/lib/queries";
 import {
-  CheckCircle2, Circle, Clock, AlertTriangle, Plus, User, X, ListTodo, ExternalLink,
+  CheckCircle2, Circle, Clock, AlertTriangle, Plus, Pencil, User, X, ListTodo, ExternalLink,
 } from "lucide-react";
 
 type FilterKey = "ALL" | "OPEN" | "OVERDUE" | "COMPLETED";
@@ -32,9 +34,11 @@ export function TasksView({
   agents: UserSummary[];
   cases: CaseOption[];
 }) {
+  const router = useRouter();
   const [filter, setFilter] = useState<FilterKey>("OPEN");
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<TaskListItem | null>(null);
   const [pending, startTransition] = useTransition();
 
   const stats = useMemo(() => {
@@ -128,7 +132,9 @@ export function TasksView({
           {/* List */}
           <div className={cn("flex flex-col gap-2", pending && "opacity-60")}>
             {filtered.length > 0 ? (
-              filtered.map((t) => <TaskRow key={t.id} task={t} onToggle={handleToggle} />)
+              filtered.map((t) => (
+                <TaskRow key={t.id} task={t} onToggle={handleToggle} onEdit={setEditing} />
+              ))
             ) : (
               <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-slate-200 py-16 text-slate-400">
                 <CheckCircle2 className="h-8 w-8 text-slate-300" />
@@ -142,13 +148,31 @@ export function TasksView({
       {showModal && (
         <NewTaskModal agents={agents} cases={cases} onClose={() => setShowModal(false)} />
       )}
+
+      {editing && (
+        <TaskEditModal
+          task={editing}
+          onClose={() => setEditing(null)}
+          // The list is server-rendered from props; refresh re-runs the RSC tree
+          // so the edited (or deleted) row arrives as fresh data.
+          onSaved={() => router.refresh()}
+        />
+      )}
     </div>
   );
 }
 
 // ─── Task row ─────────────────────────────────────────────────────────────────
 
-function TaskRow({ task, onToggle }: { task: TaskListItem; onToggle: (id: string) => void }) {
+function TaskRow({
+  task,
+  onToggle,
+  onEdit,
+}: {
+  task: TaskListItem;
+  onToggle: (id: string) => void;
+  onEdit: (task: TaskListItem) => void;
+}) {
   const isCompleted = task.status === "COMPLETED";
   return (
     <div
@@ -200,6 +224,14 @@ function TaskRow({ task, onToggle }: { task: TaskListItem; onToggle: (id: string
           )}
         </div>
       </div>
+
+      <button
+        onClick={() => onEdit(task)}
+        className="shrink-0 rounded-lg p-1.5 text-slate-300 hover:bg-slate-100 hover:text-indigo-600 transition-colors"
+        aria-label="ערוך משימה"
+      >
+        <Pencil className="h-4 w-4" />
+      </button>
     </div>
   );
 }
