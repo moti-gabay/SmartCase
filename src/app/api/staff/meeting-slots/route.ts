@@ -159,7 +159,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "לא נוצרו מועדים", ...payload }, { status: 400 });
     }
 
-    revalidatePath("/meetings");
+    revalidatePath("/scheduling");
     // 207: part of the batch landed and part was refused. The caller needs both
     // halves, not a bare success.
     return NextResponse.json(payload, { status: payload.skipped.length > 0 ? 207 : 201 });
@@ -194,7 +194,7 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: result.reason ?? DELETE_REASON_BOOKED }, { status });
     }
 
-    revalidatePath("/meetings");
+    revalidatePath("/scheduling");
     return NextResponse.json({ deleted: parsed.data.id });
   } catch (err) {
     console.error("[staff/meeting-slots:DELETE]", err);

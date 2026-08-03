@@ -34,6 +34,7 @@ export const authConfig = {
         path.startsWith("/dashboard") ||
         path.startsWith("/cases") ||
         path.startsWith("/clients") ||
+        path.startsWith("/scheduling") ||
         path.startsWith("/tasks") ||
         path.startsWith("/documents") ||
         path.startsWith("/ai-tools") ||
