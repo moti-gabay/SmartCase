@@ -2,15 +2,17 @@
 
 SmartCase is the foundation of a proactive, multi-tenant SaaS ecosystem for law and consulting firms, spanning 7 core domains — including National Insurance, Guardianship, and Conversion — across medical, legal, and bureaucratic casework. Today it runs as a single-office Hebrew (RTL) CRM live across 2 of those domains (National Insurance disability claims, Conversion): case agents track clients, cases, required documents, and tasks, and use Claude to validate uploaded documents and draft official Hebrew letters.
 
-UI copy, enum labels, and AI prompts are all in Hebrew. See [ROLES.md](ROLES.md) for the project roles and personas, [CLAUDE.md](CLAUDE.md) for full technical specs and engineering invariants, and [CONTRACT.md](CONTRACT.md) for the Team Agent Responsibility Contract (ARC) governing AI-agent autonomy in this repo.
+UI copy, enum labels, and AI prompts are all in Hebrew. See [Documentation](#documentation) for the full map — [CLAUDE.md](CLAUDE.md) for technical specs and engineering invariants, [ROLES.md](ROLES.md) for roles and personas, [CONTRACT.md](CONTRACT.md) for the Team Agent Responsibility Contract (ARC), and [docs/adoption-plan.md](docs/adoption-plan.md) for the multi-agent workflow this repo is developed under.
 
 ## Tech stack
 
 - **Framework**: Next.js 16 (App Router), React 19, TypeScript
-- **Database**: PostgreSQL via Prisma 7 with the `@prisma/adapter-pg` driver adapter (generated client lives at `src/generated/prisma`, not `node_modules`)
+- **Database**: Supabase PostgreSQL via Prisma 7 with the `@prisma/adapter-pg` driver adapter (generated client lives at `src/generated/prisma`, not `node_modules`). Connection URLs are **not** in `schema.prisma` — runtime reads `DATABASE_URL` (pooler is fine) through the adapter, while the CLI reads `DIRECT_URL` (port 5432, not the pooler). There is no `prisma/migrations/` history: schema changes ship via `npm run db:push`, so RLS is never enabled automatically — after adding a model, run [prisma/sql/enable-rls.sql](prisma/sql/enable-rls.sql) manually against Supabase to close off its auto-generated PostgREST/GraphQL API
+- **Typed JSON columns**: evolving, AI-shaped payloads are stored as Prisma `Json` rather than flattened into columns — `Case.tags`, `Document.aiValidation`, and the conversion journey's `intake` — because in each case *the shape is the contract*, owned by a Zod/TypeScript schema in application code (e.g. `src/lib/ai/story-intake-schema.ts`). Each such column pairs with explicit status / timestamp fields rather than reusing `updatedAt`, so staleness is answerable
 - **Auth**: NextAuth v5 (beta), Credentials provider with bcrypt, JWT sessions, split Edge/Node config
 - **AI**: Google Gemini (`@google/genai`, model `gemini-2.5-flash-lite`) for Hebrew document validation and letter drafting; the staff-only assistant chat (`gemini-2.5-flash`) runs all user/tool content through a PII sanitization hook ([src/lib/ai/pii-sanitizer.ts](src/lib/ai/pii-sanitizer.ts)) before it reaches the model
 - **UI**: Tailwind CSS v4 + `tailwindcss-rtl`, Radix UI primitives, `react-hook-form` + Zod
+- **Validation**: Zod schemas are the contract boundary — authored once and shared across form resolvers, server actions, route handlers, and the typed JSON columns above. Partial-patch mutations get their own schema (e.g. `updateTaskSchema`) so an absent field means "untouched", never "null"
 - **Email**: Resend, localized per client
 - **Printing/PDF**: native browser `window.print()` only — no canvas-rasterization libraries (breaks Hebrew RTL text)
 - **Case tagging**: pure client-safe add/remove/filter engine ([src/lib/case-tagger.ts](src/lib/case-tagger.ts)) over a typed tag model ([src/types/case-tags.ts](src/types/case-tags.ts)), with an injectable server-only JSONL audit sink; surfaced in the UI as case badges, filter chips, and an inline tag editor
@@ -46,7 +48,19 @@ Team-shared, committed at repo level. Secrets are **never** committed — `.mcp.
 
 `/code-review ultra` (or its alias `/ultrareview`) runs the same review as a billed, multi-agent cloud job — useful before merging riskier changes.
 
-The [BMAD-METHOD](https://github.com/bmad-method) framework is also installed under `.claude/skills/` (`bmad-*`), adding agent personas (analyst, architect, PM, dev, UX designer, tech writer, etc.) and workflow skills for planning, spec/PRD authoring, story-driven dev, and adversarial code review — invoked by name (e.g. "talk to Winston") or by skill trigger phrase (e.g. "create a spec", "run a retrospective").
+### Multi-agent architecture (BMAD + ULTRACODE)
+
+The [BMAD-METHOD](https://github.com/bmad-method) framework is installed under `.claude/skills/` (`bmad-*`), adding agent personas (analyst, architect, PM, dev, UX designer, tech writer, etc.) and workflow skills for planning, spec/PRD authoring, story-driven dev, and adversarial code review — invoked by name (e.g. "talk to Winston") or by skill trigger phrase (e.g. "create a spec", "run a retrospective").
+
+**Subagent routing principles** — how work is allocated across agents on this repo:
+
+- **Contract-first, then fan out.** A schema/spec agent runs to completion and its Zod/TypeScript contract is *frozen* before any implementation agent starts. Parallel agents consume the contract; they never renegotiate it mid-flight. This is what makes concurrent work safe rather than merely fast.
+- **One concern per agent.** Roles are narrow and separately evaluated — spec & schema, pure core logic (Ports & Adapters, no I/O), security & RLS audit, adversarial testing. A generalist agent asked to do all four does none of them accountably.
+- **Model tier follows task shape.** Architecture and planning route to the strongest reasoning tier; mechanical implementation to a mid tier; deterministic validation gates to the cheapest. Tier is set per-agent, not per-session.
+- **Adversarial verification over self-report.** A finding is not accepted because the agent that produced it is confident. Test/security agents hold veto authority on merge, and the quality gate is machine-enforced rather than agent-attested.
+- **Escalate, don't guess.** Ambiguity in a contract is surfaced back to a human, not silently resolved — a plausible wrong resolution is more expensive than a blocked branch.
+
+The adoption plan formalizing this workflow — pilot scope, KPIs, risk matrix, and the three governance rules binding agent work here — is in [docs/adoption-plan.md](docs/adoption-plan.md) (see [Documentation](#documentation)).
 
 **Hooks** ([.claude/settings.json](.claude/settings.json)) — an active, multi-layered guardrail system (see [CONTRACT.md](CONTRACT.md) §3):
 
@@ -61,9 +75,34 @@ Permission `allow`/`ask`/`deny` rules are committed alongside the hooks in the s
 
 **Other automation**:
 
-- [.github/workflows/claude-pr-review-and-fix.yml](.github/workflows/claude-pr-review-and-fix.yml) — Claude Code PR review-and-fix job. **Manual only** (`workflow_dispatch` with a validated `pr_number`); automatic `pull_request` triggers are deliberately commented out. Pushing fixes back requires write access to the PR head branch, so it only works for PRs from branches within this repo, not forks.
-- [scripts/external-code-review.py](scripts/external-code-review.py) — second-opinion review of the current git diff via an external model (OpenAI / Gemini / DeepSeek), printed and saved as Markdown. The diff leaves the machine — never run it against changes containing secrets or client PII.
+- [.github/workflows/claude-pr-review-and-fix.yml](.github/workflows/claude-pr-review-and-fix.yml) — Claude Code PR review-and-fix job. **Manual dispatch only** (`workflow_dispatch` with a validated `pr_number`); automatic `pull_request` triggers are deliberately commented out so no PR is ever reviewed-and-mutated without a human initiating it. Run it from the Actions tab or `gh workflow run claude-pr-review-and-fix.yml -f pr_number=<N>`. Pushing fixes back requires write access to the PR head branch, so it only works for PRs from branches within this repo, not forks.
+
+- [scripts/external-code-review.py](scripts/external-code-review.py) — second-opinion review of the current git diff via an **external** provider, printed to stdout and saved as timestamped Markdown under `_bmad-output/reviews/`. Deliberately outside the Claude toolchain: a reviewer from the same model family as the author shares its blind spots.
+
+  | Provider | Default model | Key |
+  |---|---|---|
+  | `gemini` (default) | `gemini-2.5-flash-lite` | `GEMINI_API_KEY` |
+  | `openai` | per `--model` | `OPENAI_API_KEY` |
+  | `deepseek` | `deepseek-chat` | `DEEPSEEK_API_KEY` |
+
+  ```bash
+  python3 scripts/external-code-review.py                              # gemini, current diff
+  python3 scripts/external-code-review.py --provider openai --model gpt-4o-mini
+  ```
+
+  ⚠️ **The diff leaves the machine.** Never run this against changes containing secrets or client PII — this repo handles medical and legal case data, and these providers are not covered by any processing agreement here.
 - [scripts/slack-daemon.js](scripts/slack-daemon.js) (`npm run slack-daemon`) — two-way bridge that turns a message in `SLACK_NOTIFY_CHANNEL` into a Claude Code run, with an append-only JSONL event log under `logs/`.
+
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [CLAUDE.md](CLAUDE.md) | Technical specs and the engineering invariants that must not be "modernized" past (Edge middleware, public-portal security model, i18n pattern, no-rasterization printing) |
+| [ROLES.md](ROLES.md) | Project roles and personas — the developer, the business stakeholder, and Claude's behavioral guardrails |
+| [CONTRACT.md](CONTRACT.md) | Team Agent Responsibility Contract (ARC) governing AI-agent autonomy in this repo |
+| [MEMORY.md](MEMORY.md) | Active build-state snapshot, loaded into every session's context |
+| [docs/adoption-plan.md](docs/adoption-plan.md) | **Agent Teams adoption plan** — two-page executive plan for the ULTRACODE coordinated multi-agent workflow: pilot scope and boundaries, the four agent roles, a KPI table with six conjunctive exit gates, a 4-week phased rollout, the risk/mitigation matrix, and the three governance rules (no automated DB migrations · 100% quality-gate pass rate · session logging and immutable audit trail) |
+| [docs/final-submission.md](docs/final-submission.md) | **Final submission package** — consolidates the shipped engineering slices (staff scheduling & MeetingSlots, task edit & deletion) against the adoption plan, with a verification section recording re-executed quality gates (322/322 tests, clean `tsc --noEmit`, clean lint) |
 
 ## Getting started
 
