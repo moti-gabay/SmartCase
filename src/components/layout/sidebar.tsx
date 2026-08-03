@@ -19,6 +19,7 @@ import {
   Scale,
   ChevronLeft,
   ShieldCheck,
+  CalendarClock,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -32,6 +33,11 @@ const NAV_ITEMS = [
 
 // Admin-only nav entry, rendered conditionally on session role.
 const ADMIN_ITEM = { href: "/admin/users", label: "ניהול משתמשים", icon: ShieldCheck } as const;
+
+// Staff-only nav entry (ADMIN | SUPERVISOR | AGENT), rendered conditionally on
+// session role. Cosmetic only — /scheduling is gated server-side in its layout.
+const STAFF_ROLES = ["ADMIN", "SUPERVISOR", "AGENT"];
+const SCHEDULING_ITEM = { href: "/scheduling", label: "מועדי פגישות", icon: CalendarClock } as const;
 
 const BOTTOM_ITEMS = [
   { href: "/settings", label: "הגדרות", icon: Settings },
@@ -83,6 +89,7 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
   const userName    = session?.user?.name  ?? "משתמש";
   const userEmail   = session?.user?.email ?? "";
   const isAdmin     = session?.user?.role === "ADMIN";
+  const isStaff     = !!session?.user?.role && STAFF_ROLES.includes(session.user.role);
   const initials    = userName.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 
   useEscapeKey(isMobileDrawerOpen, closeMobile);
@@ -211,6 +218,27 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
               </Link>
             );
           })}
+
+          {isStaff && (() => {
+            const { href, label, icon: Icon } = SCHEDULING_ITEM;
+            const isActive = pathname === href || pathname.startsWith(href + "/");
+            return (
+              <Link
+                href={href}
+                title={isCollapsed ? label : undefined}
+                onClick={closeMobile}
+                className={cn(
+                  "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                  isActive
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-indigo-200 hover:bg-white/10 hover:text-white"
+                )}
+              >
+                <Icon className="h-5 w-5 shrink-0" />
+                {!isCollapsed && <span className="truncate">{label}</span>}
+              </Link>
+            );
+          })()}
 
           {isAdmin && (() => {
             const { href, label, icon: Icon } = ADMIN_ITEM;
