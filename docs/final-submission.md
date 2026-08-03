@@ -219,8 +219,8 @@ $ npm run lint
 
 ```
 Feature slices:  ✅ Merged clean to main
-Adoption plan:   ✅ Merged clean to main (docs/adoption-plan.md)
-This document:   docs/final-submission.md — pending merge to main
+Adoption plan:   ✅ Merged clean to main — docs/adoption-plan.md (#47, ff6ad3a)
+This document:   ✅ Merged clean to main — docs/final-submission.md (#48, f2e8299)
 ```
 
 ### 4.5 Consolidated Gate Sign-off
