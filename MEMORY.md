@@ -38,3 +38,18 @@ This file is an active snapshot of the current build state — architectural and
 4. **Three-Layer Access Control**: Guarded the new `/admin/users` management portal at the Edge middleware level, the Server Component layout, and within every administrative Server Action via `requireAdmin()`.
 5. **Bricked System Protection**: Enforced strict runtime database count validations preventing self-lockout (admins demoting themselves) and last-admin mitigation (bricking the system by suspending the final approved admin).
 6. **Audit Logs**: Integrated immutable transaction-bound audit logging for every authorization, role, or status change.
+
+## Process Documentation: ULTRACODE Multi-Agent Architecture — SHIPPED
+
+Governance and submission documents for the coordinated multi-agent (Agent Teams) workflow. These are **process artifacts, not application code** — they describe how work is produced, not what the app does.
+
+1. **[docs/adoption-plan.md](docs/adoption-plan.md)** (PR #47): Two-page executive adoption plan. Page 1 covers pilot scope (Staff Scheduling & Task Management APIs), the four agent roles (Spec & Schema Lead, Pure Core Developer, Security & RLS Auditor, Adversarial Tester), and a KPI table with six **conjunctive** exit gates. Page 2 covers the 4-week phased rollout, the risk mitigation matrix, and governance rules.
+
+2. **[docs/final-submission.md](docs/final-submission.md)** (PR #48, corrected in #49): Consolidated submission package tying the shipped engineering slices (Staff Scheduling & MeetingSlots, Task Edit & Deletion) to the adoption plan, with a verification section recording re-executed quality gates.
+
+3. **The 3 Immutable Governance Rules** (from the adoption plan — these bind agent work on this repo):
+   - **No automated database migrations.** Agents propose migrations as reviewable artifacts; a senior engineer executes them. Reinforces the existing `db:push` + manual RLS workflow — the one change class that is not cheaply reversible.
+   - **Mandatory 100% quality gate pass rate.** Full test suite (no skips), `tsc --noEmit` at zero errors, linter clean, production build succeeding. A partial pass is a failure.
+   - **Session logging & immutable audit trail.** Agent attribution, tool-call history, gate results *including failures*, and human reviewer disposition. Absence of a complete trail is itself a gate failure.
+
+4. **Gate Baseline (verified at submission)**: `npm test` → **322/322** pass, 0 skipped; `npx tsc --noEmit` → 0 errors; `npm run lint` → clean repo-wide. Use this as the regression baseline — a drop in test count is a signal, not noise.
