@@ -17,6 +17,7 @@ import type {
   DocumentStatus,
 } from "@/types";
 import { parseCaseTags } from "@/types/case-tags";
+import { readStoredIntake } from "@/lib/ai/story-intake-schema";
 import { SLOT_MIN_LEAD_MS, selectableSlots } from "@/lib/portal/journey";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -484,6 +485,11 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
           storyAudioKey: c.conversionProfile.storyAudioKey,
           storyTranscript: c.conversionProfile.storyTranscript,
           storyTranscriptionStatus: c.conversionProfile.storyTranscriptionStatus,
+          // Through the same lenient parser that wrote it, never a cast — the
+          // Json column may still hold a payload from an older intake shape.
+          intake: readStoredIntake(c.conversionProfile.intake),
+          intakeStatus: c.conversionProfile.intakeStatus,
+          intakeAt: iso(c.conversionProfile.intakeAt),
           submittedAt: iso(c.conversionProfile.submittedAt),
           children: c.conversionProfile.children.map((ch) => ({
             id: ch.id,

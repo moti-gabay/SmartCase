@@ -14,9 +14,10 @@ import {
   CASE_STEP_LABELS,
   TRANSCRIPTION_STATUS_LABELS,
   isTranscribableOnDemand,
+  INTAKE_STATUS_LABELS,
 } from "../src/lib/constants";
 import { CASE_STEP_ORDER } from "../src/lib/portal/journey";
-import type { TranscriptionStatus } from "../src/types";
+import type { IntakeStatus, TranscriptionStatus } from "../src/types";
 
 test("every pipeline column has a label, color and dot", () => {
   for (const status of PIPELINE_COLUMNS) {
@@ -84,4 +85,12 @@ test("isTranscribableOnDemand is false when there is no transcription state at a
   assert.equal(isTranscribableOnDemand(null), false);
   assert.equal(isTranscribableOnDemand(undefined), false);
   assert.equal(isTranscribableOnDemand(""), false);
+});
+
+test("every intake status has a Hebrew label, and no orphan labels exist", () => {
+  const statuses: IntakeStatus[] = ["PENDING", "PROCESSING", "COMPLETED", "FAILED"];
+  for (const status of statuses) {
+    assert.ok(INTAKE_STATUS_LABELS[status], `missing label for ${status}`);
+  }
+  assert.deepEqual(Object.keys(INTAKE_STATUS_LABELS).sort(), [...statuses].sort());
 });

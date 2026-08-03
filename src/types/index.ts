@@ -1,6 +1,7 @@
 // Shared TypeScript types for the SmartCase application
 
 import type { CaseTag } from "./case-tags";
+import type { StoryIntake } from "@/lib/ai/story-intake-schema";
 
 export type UserRole = "ADMIN" | "SUPERVISOR" | "AGENT";
 export type UserStatus = "PENDING_APPROVAL" | "APPROVED" | "SUSPENDED";
@@ -50,6 +51,10 @@ export type CaseStep =
 // Server-side transcription state of a PERSONAL_STORY recording. Null means no
 // audio has been recorded at all.
 export type TranscriptionStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
+
+// Server-side state of the AI-extracted intake for a personal story. Null means
+// no extraction has ever been attempted.
+export type IntakeStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
 export type DocumentStatus = "MISSING" | "PENDING_UPLOAD" | "UPLOADED_PENDING_REVIEW" | "APPROVED" | "REJECTED" | "EXPIRED";
 export type DocumentType =
   | "NATIONAL_ID" | "MEDICAL_REPORT" | "PSYCHIATRIC_EVALUATION"
@@ -253,6 +258,11 @@ export interface ConversionProfileDetail {
   storyAudioKey?: string | null;
   storyTranscript?: string | null;
   storyTranscriptionStatus?: TranscriptionStatus | null;
+  // Verbatim StoryIntake object as validated by parseStoryIntake — read through
+  // that module's type, never trusted structurally at the render site.
+  intake?: StoryIntake | null;
+  intakeStatus?: IntakeStatus | null;
+  intakeAt?: string | null;
   submittedAt?: string | null;
   children: ConversionChildDetail[];
   references: ConversionReferenceDetail[];

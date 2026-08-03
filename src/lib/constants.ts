@@ -174,6 +174,34 @@ export function isTranscribableOnDemand(
   return status === "PENDING" || status === "FAILED";
 }
 
+// State of the AI intake extracted from a personal-story transcript. Backoffice
+// only — the portal never shows it.
+export const INTAKE_STATUS_LABELS: Record<string, string> = {
+  PENDING:    "ממתין לניתוח",
+  PROCESSING: "בניתוח",
+  COMPLETED:  "נותח",
+  FAILED:     "הניתוח נכשל",
+};
+
+// Whether staff may ask for an intake extraction now. Requires a finished
+// transcript (there is nothing to extract from otherwise), and excludes
+// PROCESSING (a run is in flight) and COMPLETED (re-running would only burn a
+// Gemini call and re-skip every deduped task). FAILED is retryable — the usual
+// causes are transient. Lives here, not in the workflow module, because that
+// module is server-only and this guard is read by a client component.
+export function isIntakeExtractableOnDemand(
+  transcriptionStatus: string | null | undefined,
+  intakeStatus: string | null | undefined,
+): boolean {
+  if (transcriptionStatus !== "COMPLETED") return false;
+  return (
+    intakeStatus === null ||
+    intakeStatus === undefined ||
+    intakeStatus === "PENDING" ||
+    intakeStatus === "FAILED"
+  );
+}
+
 export const NOTE_TYPE_LABELS: Record<string, string> = {
   INTERNAL:          "הערה פנימית",
   CALL_LOG:          "שיחת טלפון",

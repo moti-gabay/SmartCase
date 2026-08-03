@@ -178,6 +178,8 @@ export function CaseInfoPanel({ caseDetail }: CaseInfoPanelProps) {
               hasAudio={!!caseDetail.conversionProfile.storyAudioKey}
               transcript={caseDetail.conversionProfile.storyTranscript}
               transcriptionStatus={caseDetail.conversionProfile.storyTranscriptionStatus}
+              intake={caseDetail.conversionProfile.intake}
+              intakeStatus={caseDetail.conversionProfile.intakeStatus}
             />
             {caseDetail.conversionProfile.submittedAt && (
               <Row icon={Clock} label="עודכן על ידי הלקוח" value={formatDate(caseDetail.conversionProfile.submittedAt)} />
