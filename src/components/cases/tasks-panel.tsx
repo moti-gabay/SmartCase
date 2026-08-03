@@ -6,9 +6,10 @@ import { cn, formatDate, isDateOverdue } from "@/lib/utils";
 import { PriorityBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { createTask } from "@/lib/actions";
+import { TaskEditModal } from "@/components/tasks/task-edit-modal";
 import { PRIORITY_LABELS } from "@/lib/constants";
 import type { Priority, TaskDetail, TaskStatus, UserSummary } from "@/types";
-import { CheckCircle2, Circle, Clock, AlertTriangle, Plus, User, X } from "lucide-react";
+import { CheckCircle2, Circle, Clock, AlertTriangle, Pencil, Plus, User, X } from "lucide-react";
 
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   PENDING:     "ממתין",
@@ -27,9 +28,10 @@ const TASK_STATUS_COLORS: Record<TaskStatus, string> = {
 interface TaskRowProps {
   task: TaskDetail;
   onToggle: (id: string, currentStatus: TaskStatus) => void;
+  onEdit: (task: TaskDetail) => void;
 }
 
-function TaskRow({ task, onToggle }: TaskRowProps) {
+function TaskRow({ task, onToggle, onEdit }: TaskRowProps) {
   const isDue = task.dueDate && isDateOverdue(task.dueDate) && task.status !== "COMPLETED";
   const isCompleted = task.status === "COMPLETED";
 
@@ -87,6 +89,14 @@ function TaskRow({ task, onToggle }: TaskRowProps) {
           )}
         </div>
       </div>
+
+      <button
+        onClick={() => onEdit(task)}
+        className="shrink-0 rounded-lg p-1.5 text-slate-300 hover:bg-slate-100 hover:text-indigo-600 transition-colors"
+        aria-label="ערוך משימה"
+      >
+        <Pencil className="h-4 w-4" />
+      </button>
     </div>
   );
 }
@@ -99,9 +109,11 @@ interface TasksPanelProps {
 }
 
 export function TasksPanel({ tasks: initialTasks, caseId, agents }: TasksPanelProps) {
+  const router = useRouter();
   const [tasks, setTasks] = useState(initialTasks);
   const [showCompleted, setShowCompleted] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState<TaskDetail | null>(null);
 
   // The panel seeds local state from props for optimistic toggling, so a server
   // revalidation alone would not surface a newly created task — the state was
@@ -161,6 +173,17 @@ export function TasksPanel({ tasks: initialTasks, caseId, agents }: TasksPanelPr
         <NewCaseTaskModal caseId={caseId} agents={agents} onClose={() => setShowModal(false)} />
       )}
 
+      {editing && (
+        <TaskEditModal
+          task={editing}
+          onClose={() => setEditing(null)}
+          // Same prop-resync path as creation: revalidatePath refreshes the
+          // server data, router.refresh() re-runs the RSC tree so the panel
+          // receives it as new props.
+          onSaved={() => router.refresh()}
+        />
+      )}
+
       {/* Active tasks */}
       {active.length > 0 && (
         <div className="flex flex-col gap-2">
@@ -169,7 +192,7 @@ export function TasksPanel({ tasks: initialTasks, caseId, agents }: TasksPanelPr
               const pOrder = { URGENT: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
               return pOrder[a.priority] - pOrder[b.priority];
             })
-            .map((t) => <TaskRow key={t.id} task={t} onToggle={handleToggle} />)}
+            .map((t) => <TaskRow key={t.id} task={t} onToggle={handleToggle} onEdit={setEditing} />)}
         </div>
       )}
 
@@ -185,7 +208,7 @@ export function TasksPanel({ tasks: initialTasks, caseId, agents }: TasksPanelPr
           </button>
           {showCompleted && (
             <div className="flex flex-col gap-2">
-              {completed.map((t) => <TaskRow key={t.id} task={t} onToggle={handleToggle} />)}
+              {completed.map((t) => <TaskRow key={t.id} task={t} onToggle={handleToggle} onEdit={setEditing} />)}
             </div>
           )}
         </div>
