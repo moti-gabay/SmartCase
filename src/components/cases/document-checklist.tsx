@@ -414,6 +414,24 @@ export function DocumentChecklist({ items, caseId, documents }: DocumentChecklis
       }
 
       setUploadSuccess(`המסמך "${payload.displayName}" הועלה בהצלחה`);
+
+      // 4) Dynamic document workflow. Awaited (not fired and forgotten) because
+      // on Vercel the function can be frozen the moment the response is sent.
+      // A failure here is reported but never undoes a successful upload.
+      const analyzeRes = await fetch(`/api/documents/${documentId}/analyze`, { method: "POST" });
+      if (analyzeRes.ok) {
+        const { result } = await analyzeRes.json().catch(() => ({ result: null }));
+        const effects: string[] = [];
+        if (result?.tasksCreated) effects.push(`${result.tasksCreated} משימות למסמכים חסרים`);
+        if (result?.hearingScheduledAt) effects.push("דיון בבית דין");
+        if (result?.managerFlagged) effects.push("סימון לבדיקת מנהל");
+        if (effects.length > 0) {
+          setUploadSuccess(`המסמך "${payload.displayName}" הועלה ונותח: ${effects.join(", ")}`);
+        }
+      } else {
+        setUploadSuccess(`המסמך "${payload.displayName}" הועלה בהצלחה (ניתוח ה-AI נכשל)`);
+      }
+
       startTransition(() => router.refresh());
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "העלאת המסמך נכשלה");

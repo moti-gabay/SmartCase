@@ -9,6 +9,10 @@
       "maxDuration": 60,
       "memory": 1024
     },
+    "src/app/api/documents/**": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
     "src/app/api/**": {
       "maxDuration": 30
     }
