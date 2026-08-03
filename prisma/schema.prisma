@@ -176,6 +176,19 @@ enum TranscriptionStatus {
   FAILED
 }
 
+// Server-side state of the structured intake extracted from a COMPLETED story
+// transcript (see src/lib/workflows/story-intake.ts). Null means "never
+// attempted" — the field only carries a value once a run has claimed the row.
+// PROCESSING is a claim marker: the route claims with an updateMany whose WHERE
+// includes the previous status, so two concurrent invocations can never both
+// call Gemini for the same profile.
+enum IntakeStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 // AI assistant chat message author. Internal to the chat feature — not rendered
 // as a labeled status chip, so it has no entry in src/lib/constants.ts.
 enum ChatRole {
@@ -563,6 +576,16 @@ model ConversionProfile {
   storyAudioUrl            String?
   storyTranscript          String?              @db.Text
   storyTranscriptionStatus TranscriptionStatus?
+
+  // Structured intake derived from the COMPLETED story transcript. Stored as
+  // Json (not columns) because the shape IS the AI contract in
+  // src/lib/ai/story-intake-schema.ts and will evolve — same treatment as
+  // Document.aiValidation. intakeAt is explicit rather than reusing updatedAt,
+  // which every portal edit and the transcription worker also bump, so it could
+  // never answer "is this intake stale relative to the transcript?".
+  intake       Json?
+  intakeStatus IntakeStatus?
+  intakeAt     DateTime?
 
   submittedAt      DateTime?
   createdAt        DateTime  @default(now())

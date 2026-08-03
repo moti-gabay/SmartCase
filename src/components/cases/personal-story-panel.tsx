@@ -3,8 +3,14 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { TRANSCRIPTION_STATUS_LABELS, isTranscribableOnDemand } from "@/lib/constants";
-import type { TranscriptionStatus } from "@/types";
+import {
+  INTAKE_STATUS_LABELS,
+  TRANSCRIPTION_STATUS_LABELS,
+  isIntakeExtractableOnDemand,
+  isTranscribableOnDemand,
+} from "@/lib/constants";
+import type { IntakeStatus, TranscriptionStatus } from "@/types";
+import type { StoryIntake } from "@/lib/ai/story-intake-schema";
 import { Play, Pause, Mic, FileText, Loader2, AlertTriangle, Sparkles } from "lucide-react";
 
 // Staff-side view of the client's personal story: the written text, the voice
@@ -14,13 +20,15 @@ import { Play, Pause, Mic, FileText, Loader2, AlertTriangle, Sparkles } from "lu
 // presigned GET — the R2 key is never exposed to the browser, and the session
 // guard lives on that route (not on a portal token).
 export function PersonalStoryPanel({
-  caseId, personalStory, hasAudio, transcript, transcriptionStatus,
+  caseId, personalStory, hasAudio, transcript, transcriptionStatus, intake, intakeStatus,
 }: {
   caseId: string;
   personalStory?: string | null;
   hasAudio: boolean;
   transcript?: string | null;
   transcriptionStatus?: TranscriptionStatus | null;
+  intake?: StoryIntake | null;
+  intakeStatus?: IntakeStatus | null;
 }) {
   if (!personalStory && !hasAudio) return null;
 
@@ -39,6 +47,10 @@ export function PersonalStoryPanel({
           <TranscriptBlock transcript={transcript} status={transcriptionStatus} />
           {isTranscribableOnDemand(transcriptionStatus) && (
             <TranscribeNowButton caseId={caseId} status={transcriptionStatus} />
+          )}
+          <IntakeBlock intake={intake} status={intakeStatus} />
+          {isIntakeExtractableOnDemand(transcriptionStatus, intakeStatus) && (
+            <ExtractIntakeButton caseId={caseId} status={intakeStatus} />
           )}
         </>
       )}
@@ -133,6 +145,120 @@ function TranscriptBlock({ transcript, status }: { transcript?: string | null; s
       )}
       {TRANSCRIPTION_STATUS_LABELS[status]}
     </div>
+  );
+}
+
+// Manual trigger for the intake extraction. Same shape as TranscribeNowButton —
+// targets THIS case, so a click can never fan out onto some other case's story
+// and report success here.
+function ExtractIntakeButton({ caseId, status }: { caseId: string; status?: IntakeStatus | null }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
+
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/ai/story-intake", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caseId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "ניתוח הסיפור האישי נכשל");
+      // The fan-out is deliberately partial-success (207), so an ok response
+      // still has to be inspected before it is reported as one.
+      if (Array.isArray(data.result?.failures) && data.result.failures.length > 0) {
+        throw new Error("חלק מהפעולות האוטומטיות נכשלו, אפשר לנסות שוב");
+      }
+
+      startTransition(() => router.refresh());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ניתוח הסיפור האישי נכשל");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={run}
+        disabled={busy}
+        className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-60 print:hidden"
+      >
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+        {busy ? "מנתח..." : status === "FAILED" ? "נסה לנתח שוב" : "הפק אינטייק"}
+      </button>
+      {error && (
+        <div className="mt-2 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The structured intake is exactly what a case agent wants on paper before a
+// first meeting, so unlike the player this block is print-visible.
+function IntakeBlock({ intake, status }: { intake?: StoryIntake | null; status?: IntakeStatus | null }) {
+  if (intake) {
+    return (
+      <div className="rounded-lg bg-slate-50 p-3">
+        <div className="mb-1.5 flex items-center gap-1.5">
+          <Sparkles className="h-3.5 w-3.5 text-indigo-500" />
+          <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">אינטייק מהסיפור האישי</p>
+        </div>
+        <div className="flex flex-col gap-1 text-xs leading-relaxed text-slate-600">
+          {intake.motivationSummary && <p className="whitespace-pre-wrap">{intake.motivationSummary}</p>}
+          <IntakeField label="משך התהליך" value={intake.processDuration} />
+          <IntakeField label="מצב משפחתי" value={intake.familyStatus} />
+          <IntakeField label="שיוך קהילתי" value={intake.communityAffiliation} />
+          <IntakeField label="מסמכים שהוזכרו" value={intake.mentionedDocuments.join(", ")} />
+          <IntakeField label="אנשים שהוזכרו" value={intake.mentionedPeople.join(", ")} />
+        </div>
+        {intake.hasRedFlags && (
+          <div className="mt-2 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            {intake.redFlagNotes ?? "ה-AI סימן ממצאים חריגים בסיפור האישי."}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (!status) return null;
+
+  const failed = status === "FAILED";
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium",
+        failed ? "bg-red-50 text-red-700" : "bg-slate-50 text-slate-500"
+      )}
+    >
+      {failed ? (
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+      ) : (
+        <Loader2 className={cn("h-3.5 w-3.5 shrink-0", status === "PROCESSING" && "animate-spin")} />
+      )}
+      {INTAKE_STATUS_LABELS[status]}
+    </div>
+  );
+}
+
+// Empty values are omitted entirely rather than rendered as a blank row — the
+// model returns null for anything the story did not say.
+function IntakeField({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <p>
+      <span className="font-semibold text-slate-500">{label}: </span>
+      {value}
+    </p>
   );
 }
 
