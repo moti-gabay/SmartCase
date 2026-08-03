@@ -3,7 +3,7 @@ import type { NoteDetail, StatusHistoryEntry, NoteType, CaseActivityEntry, Activ
 import { CASE_STATUS_LABELS, CASE_STATUS_DOT, NOTE_TYPE_LABELS } from "@/lib/constants";
 import {
   Phone, Mail, Users, Building2, StickyNote, Cpu, ArrowRight, Lock,
-  FilePlus2, Upload, CheckCircle2, XCircle, Milestone, Sparkles,
+  FilePlus2, Upload, CheckCircle2, XCircle, Milestone, Sparkles, CalendarClock,
 } from "lucide-react";
 
 // ─── Note type icons ──────────────────────────────────────────────────────────
@@ -44,6 +44,7 @@ const ACTIVITY_ICONS: Record<ActivityType, React.ElementType> = {
   DOCUMENT_REJECTED: XCircle,
   STEP_CHANGED:      Milestone,
   AI_CALL_SUMMARY:   Sparkles,
+  MEETING_SCHEDULED: CalendarClock,
 };
 
 const ACTIVITY_ICON_BG: Record<ActivityType, string> = {
@@ -53,6 +54,7 @@ const ACTIVITY_ICON_BG: Record<ActivityType, string> = {
   DOCUMENT_REJECTED: "bg-red-100 text-red-600",
   STEP_CHANGED:      "bg-violet-100 text-violet-600",
   AI_CALL_SUMMARY:   "bg-amber-100 text-amber-600",
+  MEETING_SCHEDULED: "bg-sky-100 text-sky-600",
 };
 
 // ─── Combined timeline entry type ─────────────────────────────────────────────

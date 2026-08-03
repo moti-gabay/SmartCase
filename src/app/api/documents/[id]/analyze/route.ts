@@ -8,6 +8,7 @@ import { logCaseActivity } from "@/lib/activity";
 import { DOCUMENT_TYPE_LABELS } from "@/lib/constants";
 import { buildDocumentAnalysisPrompt, parseDocumentAnalysis } from "@/lib/ai/document-schema";
 import {
+  HEARING_DURATION_MINUTES,
   HEARING_LOCATION,
   HEARING_TASK_TITLE,
   runDocumentAutomation,
@@ -132,23 +133,50 @@ function buildPorts(actorId: string, documentId: string, documentName: string): 
       return created.count;
     },
 
-    // The office's bookable-slot model (MeetingSlot) belongs to the in-flight
-    // Smart Scheduling branch and does not exist on main, so a detected hearing
-    // lands as the case's next follow-up date plus a dated task. Swapping this
-    // one port body for a `meetingSlot.upsert` on `bookedCaseId` once that
-    // branch merges changes nothing in the engine or its tests.
+    // Books the hearing onto the case's MeetingSlot. `bookedCaseId` is unique,
+    // which is what makes upsert (not create) correct: a revised hearing date
+    // moves the case's existing slot instead of violating the constraint.
+    //
+    // The published check is the important guard. That same unique column also
+    // carries the client's own office meeting booked through the portal
+    // (isPublished: true, chosen from real availability). Blindly upserting
+    // would silently relocate that meeting to "בית דין" on the hearing date and
+    // the client would never be told — so a published slot is left untouched and
+    // the hearing falls back to the case's follow-up date plus a dated task.
     scheduleHearing: async (caseId, startsAt) => {
       const day = startsAt.toISOString().slice(0, 10);
       await prisma.$transaction(async (tx) => {
         await tx.case.update({ where: { id: caseId }, data: { nextFollowUpDate: startsAt } });
+
+        const existing = await tx.meetingSlot.findUnique({
+          where: { bookedCaseId: caseId },
+          select: { id: true, isPublished: true },
+        });
+        const clientBookedMeeting = existing?.isPublished === true;
+
+        if (!clientBookedMeeting) {
+          await tx.meetingSlot.upsert({
+            where: { bookedCaseId: caseId },
+            create: {
+              startsAt,
+              durationMinutes: HEARING_DURATION_MINUTES,
+              location: HEARING_LOCATION,
+              isPublished: false,
+              bookedCaseId: caseId,
+              bookedAt: new Date(),
+            },
+            update: { startsAt, durationMinutes: HEARING_DURATION_MINUTES, location: HEARING_LOCATION },
+          });
+        }
+
         // A revised date for the same hearing moves the existing task rather
         // than stacking a second one — the fixed title is the identity here.
-        const existing = await tx.task.findFirst({
+        const task = await tx.task.findFirst({
           where: { caseId, title: HEARING_TASK_TITLE, status: { in: ["PENDING", "IN_PROGRESS"] } },
           select: { id: true },
         });
-        if (existing) {
-          await tx.task.update({ where: { id: existing.id }, data: { dueDate: startsAt } });
+        if (task) {
+          await tx.task.update({ where: { id: task.id }, data: { dueDate: startsAt } });
         } else {
           await tx.task.create({
             data: {
@@ -161,12 +189,15 @@ function buildPorts(actorId: string, documentId: string, documentName: string): 
             },
           });
         }
+
         await logCaseActivity(
           tx,
           caseId,
-          "DOCUMENT_UPLOADED",
-          `דיון בבית דין נקבע ל-${day} מתוך ניתוח "${documentName}".`,
-          { documentId, startsAt: startsAt.toISOString() },
+          "MEETING_SCHEDULED",
+          clientBookedMeeting
+            ? `דיון בבית דין זוהה ל-${day} מתוך ניתוח "${documentName}". הפגישה שהלקוח קבע נשארה ללא שינוי.`
+            : `דיון בבית דין נקבע ל-${day} מתוך ניתוח "${documentName}".`,
+          { documentId, startsAt: startsAt.toISOString(), clientBookedMeeting },
           actorId,
         );
       });

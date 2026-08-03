@@ -6,7 +6,11 @@ import {
   nextStep,
   isClientAdvanceable,
   canAdvance,
+  isSlotSelectable,
+  selectableSlots,
+  SLOT_MIN_LEAD_MS,
   type JourneySnapshot,
+  type SchedulableSlot,
 } from "../src/lib/portal/journey";
 import type { CaseStep, DocumentStatus } from "../src/types";
 
@@ -21,6 +25,7 @@ const complete = (): JourneySnapshot => ({
   },
   mandatoryChecklist: [{ status: "UPLOADED_PENDING_REVIEW" }, { status: "APPROVED" }],
   referenceCount: MIN_REFERENCES,
+  hasBookedMeeting: true,
 });
 
 // Fresh case: nothing saved yet — profile row doesn't exist (lazy creation).
@@ -29,6 +34,7 @@ const empty = (): JourneySnapshot => ({
   profile: null,
   mandatoryChecklist: [{ status: "MISSING" }],
   referenceCount: 0,
+  hasBookedMeeting: false,
 });
 
 // ── step ordering ──────────────────────────────────────────────────────────────
@@ -40,9 +46,11 @@ test("nextStep walks the full journey in order and returns null at the end", () 
   assert.equal(nextStep("TRACKING"), null);
 });
 
-test("isClientAdvanceable blocks exactly the staff-driven and terminal steps", () => {
+test("TRACKING is the only step the client can never advance out of", () => {
   const blocked = CASE_STEP_ORDER.filter((s) => !isClientAdvanceable(s));
-  assert.deepEqual(blocked, ["SCHEDULE_MEETING", "TRACKING"]);
+  // SCHEDULE_MEETING left this list when Smart Scheduling gave the client a way
+  // to complete it themselves.
+  assert.deepEqual(blocked, ["TRACKING"]);
 });
 
 // ── zero-input screens ─────────────────────────────────────────────────────────
@@ -194,7 +202,77 @@ test("PENDING_DOCS requires every mandatory item past MISSING/PENDING_UPLOAD", (
 
 // ── staff-driven / terminal steps stay safe even if called directly ────────────
 
-test("SCHEDULE_MEETING and TRACKING never client-advance, even with a complete snapshot", () => {
-  assert.deepEqual(canAdvance("SCHEDULE_MEETING", complete()), { ok: false, reason: "STAFF_ONLY_TRANSITION" });
+test("SCHEDULE_MEETING advances only once a slot is actually booked", () => {
+  assert.deepEqual(canAdvance("SCHEDULE_MEETING", complete()), { ok: true });
+  assert.deepEqual(canAdvance("SCHEDULE_MEETING", { ...complete(), hasBookedMeeting: false }), {
+    ok: false,
+    reason: "MEETING_NOT_SCHEDULED",
+  });
+});
+
+test("a booked meeting alone does not skip the earlier guards", () => {
+  // hasBookedMeeting must not leak backwards into steps that own other rules.
+  const booked = { ...empty(), hasBookedMeeting: true };
+  assert.equal(canAdvance("WIZARD_PERSONAL", booked).ok, false);
+  assert.equal(canAdvance("PENDING_DOCS", booked).ok, false);
+});
+
+test("TRACKING is terminal even with a complete snapshot", () => {
   assert.deepEqual(canAdvance("TRACKING", complete()), { ok: false, reason: "JOURNEY_COMPLETE" });
+});
+
+// ── slot selection ─────────────────────────────────────────────────────────────
+
+const NOW = new Date("2026-08-03T10:00:00.000Z");
+
+const slot = (over: Partial<SchedulableSlot> = {}): SchedulableSlot => ({
+  id: "slot-1",
+  startsAt: new Date(NOW.getTime() + 3 * SLOT_MIN_LEAD_MS).toISOString(),
+  durationMinutes: 45,
+  location: "משרד המשרד",
+  isPublished: true,
+  isBooked: false,
+  ...over,
+});
+
+test("a slot is selectable only when published, unbooked and past the lead time", () => {
+  assert.equal(isSlotSelectable(slot(), NOW), true);
+  assert.equal(isSlotSelectable(slot({ isPublished: false }), NOW), false);
+  assert.equal(isSlotSelectable(slot({ isBooked: true }), NOW), false);
+});
+
+test("the lead time is a hard boundary, not a soft preference", () => {
+  const exactly = new Date(NOW.getTime() + SLOT_MIN_LEAD_MS).toISOString();
+  const justUnder = new Date(NOW.getTime() + SLOT_MIN_LEAD_MS - 1000).toISOString();
+  assert.equal(isSlotSelectable(slot({ startsAt: exactly }), NOW), true);
+  assert.equal(isSlotSelectable(slot({ startsAt: justUnder }), NOW), false);
+});
+
+test("a past or unparseable start is never offered", () => {
+  assert.equal(isSlotSelectable(slot({ startsAt: "2026-01-01T09:00:00.000Z" }), NOW), false);
+  assert.equal(isSlotSelectable(slot({ startsAt: "בקרוב" }), NOW), false);
+  assert.equal(isSlotSelectable(slot({ startsAt: "" }), NOW), false);
+});
+
+test("selectableSlots filters and sorts soonest-first regardless of input order", () => {
+  const far = slot({ id: "far", startsAt: new Date(NOW.getTime() + 10 * SLOT_MIN_LEAD_MS).toISOString() });
+  const near = slot({ id: "near", startsAt: new Date(NOW.getTime() + 2 * SLOT_MIN_LEAD_MS).toISOString() });
+  const taken = slot({ id: "taken", isBooked: true });
+  const soon = slot({ id: "soon", startsAt: new Date(NOW.getTime() + 60_000).toISOString() });
+
+  const result = selectableSlots([far, taken, soon, near], NOW);
+  assert.deepEqual(result.map((s) => s.id), ["near", "far"]);
+});
+
+test("selectableSlots returns an empty list rather than throwing when nothing qualifies", () => {
+  assert.deepEqual(selectableSlots([slot({ isBooked: true })], NOW), []);
+  assert.deepEqual(selectableSlots([], NOW), []);
+});
+
+test("a custom lead time overrides the default without touching the other rules", () => {
+  const soon = slot({ startsAt: new Date(NOW.getTime() + 60_000).toISOString() });
+  assert.equal(isSlotSelectable(soon, NOW), false);
+  assert.equal(isSlotSelectable(soon, NOW, 30_000), true);
+  // still blocked for the reasons that are not about time
+  assert.equal(isSlotSelectable({ ...soon, isBooked: true }, NOW, 30_000), false);
 });
