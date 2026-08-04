@@ -33,15 +33,28 @@ interface Call {
 type MockOptions = Parameters<typeof mock.module>[1];
 const asExports = (exports: Json) => ({ exports }) as unknown as MockOptions;
 
+// Authored-record counts backing the referential-integrity guard in
+// adminDeleteUser, keyed by the model the action counts on.
+interface AuthoredCounts {
+  case: number;
+  note: number;
+  task: number;
+  caseStatusHistory: number;
+}
+
 const state: {
   session: unknown;
   target: TargetUser | null;
   otherApprovedAdmins: number;
+  authored: AuthoredCounts;
+  transactionError: unknown;
   calls: Call[];
 } = {
   session: null,
   target: null,
   otherApprovedAdmins: 0,
+  authored: { case: 0, note: 0, task: 0, caseStatusHistory: 0 },
+  transactionError: null,
   calls: [],
 };
 
@@ -49,6 +62,8 @@ function reset(overrides: Partial<typeof state> = {}) {
   state.session = { user: { id: "admin-1", role: "ADMIN" } };
   state.target = { role: "AGENT", status: "PENDING_APPROVAL" };
   state.otherApprovedAdmins = 0;
+  state.authored = { case: 0, note: 0, task: 0, caseStatusHistory: 0 };
+  state.transactionError = null;
   state.calls = [];
   Object.assign(state, overrides);
 }
@@ -75,6 +90,10 @@ mock.module(
           state.calls.push({ op: "user.update", args });
           return { __op: "user.update" };
         },
+        delete: (args: Json) => {
+          state.calls.push({ op: "user.delete", args });
+          return { __op: "user.delete" };
+        },
       },
       auditLog: {
         create: (args: Json) => {
@@ -82,8 +101,34 @@ mock.module(
           return { __op: "auditLog.create" };
         },
       },
+      // The four authored-record relations adminDeleteUser counts in parallel.
+      case: {
+        count: async (args: Json) => {
+          state.calls.push({ op: "case.count", args });
+          return state.authored.case;
+        },
+      },
+      note: {
+        count: async (args: Json) => {
+          state.calls.push({ op: "note.count", args });
+          return state.authored.note;
+        },
+      },
+      task: {
+        count: async (args: Json) => {
+          state.calls.push({ op: "task.count", args });
+          return state.authored.task;
+        },
+      },
+      caseStatusHistory: {
+        count: async (args: Json) => {
+          state.calls.push({ op: "caseStatusHistory.count", args });
+          return state.authored.caseStatusHistory;
+        },
+      },
       $transaction: async (ops: unknown[]) => {
         state.calls.push({ op: "$transaction", size: ops.length });
+        if (state.transactionError) throw state.transactionError;
         return ops;
       },
     },
@@ -107,6 +152,8 @@ const actions = () => (actionsPromise ??= import("../src/lib/actions"));
 
 const adminUpdateUser: Actions["adminUpdateUser"] = async (...args) =>
   (await actions()).adminUpdateUser(...args);
+const adminDeleteUser: Actions["adminDeleteUser"] = async (...args) =>
+  (await actions()).adminDeleteUser(...args);
 const approveUser: Actions["approveUser"] = async (...args) =>
   (await actions()).approveUser(...args);
 const suspendUser: Actions["suspendUser"] = async (...args) =>
@@ -327,4 +374,141 @@ test("approveUser re-approving an already approved admin is not a privilege loss
   await approveUser("u-2");
   assert.equal(only("user.count").length, 0);
   assert.equal(only("$transaction").length, 1);
+});
+
+// ── adminDeleteUser: guards ───────────────────────────────────────────────────
+
+test("adminDeleteUser rejects an unauthenticated caller", async () => {
+  reset({ session: null });
+  await assert.rejects(() => adminDeleteUser("u-2"), /Unauthorized/);
+  assert.equal(only("user.findUnique").length, 0, "must not read the target before authorizing");
+});
+
+test("adminDeleteUser rejects a non-ADMIN staff role", async () => {
+  for (const role of ["SUPERVISOR", "AGENT"]) {
+    reset({ session: { user: { id: "u-9", role } } });
+    await assert.rejects(() => adminDeleteUser("u-2"), /Unauthorized/, `${role} must not delete users`);
+    assert.equal(only("$transaction").length, 0, `${role} must not write`);
+  }
+});
+
+test("an admin cannot delete their own account", async () => {
+  reset();
+  await assert.rejects(() => adminDeleteUser("admin-1"), /לא ניתן למחוק את המשתמש שלך/);
+  assert.equal(only("user.findUnique").length, 0, "self-check precedes the target read");
+});
+
+test("adminDeleteUser rejects a missing target", async () => {
+  reset({ target: null });
+  await assert.rejects(() => adminDeleteUser("ghost"), /המשתמש לא נמצא/);
+  assert.equal(only("$transaction").length, 0);
+});
+
+test("the final approved admin cannot be deleted", async () => {
+  reset({ target: { role: "ADMIN", status: "APPROVED" }, otherApprovedAdmins: 0 });
+  await assert.rejects(() => adminDeleteUser("u-2"), /לא ניתן למחוק את מנהל המערכת המאושר האחרון/);
+  assert.equal(only("$transaction").length, 0);
+  assert.equal(only("case.count").length, 0, "the FK guard is never reached");
+});
+
+test("the delete last-admin count excludes the target itself", async () => {
+  reset({ target: { role: "ADMIN", status: "APPROVED" }, otherApprovedAdmins: 0 });
+  await assert.rejects(() => adminDeleteUser("u-2"));
+  assert.deepEqual(argsOf("user.count", "where"), {
+    role: "ADMIN",
+    status: "APPROVED",
+    id: { not: "u-2" },
+  });
+});
+
+test("an admin may be deleted while another approved admin remains", async () => {
+  reset({ target: { role: "ADMIN", status: "APPROVED" }, otherApprovedAdmins: 1 });
+  await adminDeleteUser("u-2");
+  assert.equal(only("$transaction").length, 1);
+});
+
+test("a pending admin is not protected by the delete last-admin guard", async () => {
+  reset({ target: { role: "ADMIN", status: "PENDING_APPROVAL" }, otherApprovedAdmins: 0 });
+  await adminDeleteUser("u-2");
+  assert.equal(only("user.count").length, 0, "an unapproved admin holds no access to lose");
+  assert.equal(only("$transaction").length, 1);
+});
+
+// ── adminDeleteUser: referential-integrity guard ──────────────────────────────
+
+test("a user who authored any record class is not deletable", async () => {
+  const relations = ["case", "note", "task", "caseStatusHistory"] as const;
+  for (const relation of relations) {
+    reset({ authored: { case: 0, note: 0, task: 0, caseStatusHistory: 0, [relation]: 1 } });
+    await assert.rejects(
+      () => adminDeleteUser("u-2"),
+      /לא ניתן למחוק משתמש עם היסטוריית פעילות במערכת/,
+      `an authored ${relation} must block the delete`,
+    );
+    assert.equal(only("$transaction").length, 0, `${relation} must not reach the write`);
+  }
+});
+
+test("the integrity guard sums across relations rather than testing any one", async () => {
+  reset({ authored: { case: 1, note: 2, task: 3, caseStatusHistory: 4 } });
+  await assert.rejects(() => adminDeleteUser("u-2"), /היסטוריית פעילות במערכת/);
+});
+
+test("the integrity guard counts each relation by its own author column", async () => {
+  reset();
+  await adminDeleteUser("u-2");
+  assert.deepEqual(argsOf("case.count", "where"), { createdById: "u-2" });
+  assert.deepEqual(argsOf("note.count", "where"), { authorId: "u-2" });
+  assert.deepEqual(argsOf("task.count", "where"), { createdById: "u-2" });
+  assert.deepEqual(argsOf("caseStatusHistory.count", "where"), { changedById: "u-2" });
+});
+
+test("a clean account passes the integrity guard", async () => {
+  reset();
+  await adminDeleteUser("u-2");
+  assert.equal(only("$transaction").length, 1);
+});
+
+// ── adminDeleteUser: the write and its failure modes ──────────────────────────
+
+test("adminDeleteUser deletes the target and audits in one transaction", async () => {
+  reset({ target: { role: "AGENT", status: "SUSPENDED" } });
+  await adminDeleteUser("u-2");
+
+  assert.equal(only("$transaction")[0]?.size, 2, "delete + audit row must be one atomic write");
+  assert.deepEqual(argsOf("user.delete", "where"), { id: "u-2" });
+
+  const data = argsOf("auditLog.create", "data");
+  assert.equal(data.userId, "admin-1", "audit attributes the acting admin, not the deleted user");
+  assert.equal(data.action, "USER_DELETE");
+  assert.equal(data.entityType, "User");
+  assert.equal(data.entityId, "u-2");
+  assert.deepEqual(data.metadata, { role: "AGENT", status: "SUSPENDED" });
+});
+
+test("adminDeleteUser revalidates the admin users page", async () => {
+  reset();
+  await adminDeleteUser("u-2");
+  assert.deepEqual(only("revalidatePath"), [{ op: "revalidatePath", path: "/admin/users" }]);
+});
+
+test("a P2003 foreign-key violation surfaces as the suspend-instead message", async () => {
+  reset({ transactionError: Object.assign(new Error("FK violation"), { code: "P2003" }) });
+  await assert.rejects(
+    () => adminDeleteUser("u-2"),
+    /לא ניתן למחוק משתמש המשויך לרשומות במערכת/,
+  );
+  assert.equal(only("revalidatePath").length, 0, "a failed delete must not revalidate");
+});
+
+test("a non-P2003 database error propagates unchanged", async () => {
+  const raw = Object.assign(new Error("connection reset"), { code: "P1001" });
+  reset({ transactionError: raw });
+  await assert.rejects(() => adminDeleteUser("u-2"), (e: unknown) => e === raw);
+});
+
+test("an error with no Prisma code propagates unchanged", async () => {
+  const raw = new Error("boom");
+  reset({ transactionError: raw });
+  await assert.rejects(() => adminDeleteUser("u-2"), (e: unknown) => e === raw);
 });
