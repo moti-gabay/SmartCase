@@ -61,3 +61,6 @@ _bmad-output/session-summaries/
 
 # generated UI-verification artifacts
 /_bmad-output/
+
+# graphify
+graphify-out/
