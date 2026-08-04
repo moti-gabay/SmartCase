@@ -93,6 +93,21 @@ Permission `allow`/`ask`/`deny` rules are committed alongside the hooks in the s
   ⚠️ **The diff leaves the machine.** Never run this against changes containing secrets or client PII — this repo handles medical and legal case data, and these providers are not covered by any processing agreement here.
 - [scripts/slack-daemon.js](scripts/slack-daemon.js) (`npm run slack-daemon`) — two-way bridge that turns a message in `SLACK_NOTIFY_CHANNEL` into a Claude Code run, with an append-only JSONL event log under `logs/`.
 
+## Structural knowledge graph (Graphify)
+
+An AST-derived graph of the repo in `graphify-out/` (gitignored) — nodes are files/functions/types, edges are `calls`/`imports`/`contains`/`references`. Extraction is deterministic Tree-sitter parsing: no LLM, no API key. Community detection groups the graph into functional clusters (API routes & authorization, auth & dashboard pages, meeting slots API, AI assistant chat & tools, …), which is how cross-cutting invariants and blast radius get traced structurally instead of by convention.
+
+![Graphify knowledge graph of the SmartCase repo, colored by detected community](docs/images/graphify-knowledge-graph.png)
+
+```bash
+python3 -m graphify query "who calls requireAdmin"   # BFS traversal from matched nodes
+python3 -m graphify explain "resolvePortalToken"     # one node, its neighbors, edge directions
+python3 -m graphify affected "resolvePortalToken"    # reverse traversal — blast radius
+python3 -m graphify update .                         # rebuild after code changes
+```
+
+See [CLAUDE.md](CLAUDE.md#structural-knowledge-graph-graphify) for the execution protocol and the two known rough edges (HTML viz node limit, `.sql` files invisible to the extractor).
+
 ## Documentation
 
 | Document | What it covers |
