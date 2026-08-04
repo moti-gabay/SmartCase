@@ -8,7 +8,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --import tsx --test --test-timeout=30000 tests/*.test.ts",
+    "test": "node --experimental-test-module-mocks --disable-warning=ExperimentalWarning --import tsx --test --test-timeout=30000 tests/*.test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
