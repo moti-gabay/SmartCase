@@ -44,6 +44,38 @@ Team-shared, committed at repo level. Secrets are **never** committed — `.mcp.
 - **Skill** `nextjs16-convention-validator` ([.claude/skills/](.claude/skills/nextjs16-convention-validator/SKILL.md)) — auto-loads when editing/reviewing invariant-touching code (middleware, auth, Prisma, public portal, printing, RTL, enum→i18n) and reports violations against the invariants below.
 - **Command** `/new-slice <desc>` ([.claude/commands/new-slice.md](.claude/commands/new-slice.md)) — scaffolds a vertical feature slice through the canonical file-flow (schema → types → constants → queries → actions → i18n → routes/UI), runs the validator skill, then the `npm test` + `npm run build` gate.
 
+## Structural Knowledge Graph (Graphify)
+
+An AST-derived graph of the repo in `graphify-out/` (gitignored) — nodes are files/functions/types, edges are `calls`/`imports`/`contains`/`references`. Code extraction is deterministic Tree-sitter parsing with **no LLM and no API key**; only docs/papers/images would need one, and those are not worth extracting here. `graphify` is a local dev tool installed via `pip install graphifyy` — **not** a repo dependency, and nothing in `npm run build` or the test suite depends on it.
+
+### Primary use cases — consult the graph *before* editing when
+
+- Performing multi-file refactoring, or tracing a cross-cutting invariant through the files that enforce it.
+- Analyzing blast radius — who calls a function or imports a module (inbound/outbound edges) before you change its signature or behavior.
+- Auditing a security-critical function, or checking God Nodes and coupling gaps. This is how the `resolvePortalToken` chokepoint was confirmed to be the sole identity resolver across all 10 public-portal routes (invariant 2 below), structurally rather than by convention.
+- Investigating test-coverage gaps: a high-fan-out module with no paired `tests/<name>.test.ts` is the signal. `src/lib/actions.ts` was found and closed this way.
+
+### Execution protocol
+
+The `graphify` binary is usually not on `PATH` — always invoke through the Python module.
+
+```bash
+python3 -m graphify query "who calls requireAdmin"   # BFS traversal from matched nodes
+python3 -m graphify explain "resolvePortalToken"     # one node, its neighbors, edge directions
+python3 -m graphify affected "resolvePortalToken"    # reverse traversal — blast radius
+python3 -m graphify update .                         # rebuild after code changes
+```
+
+`update .` is the rebuild command. A bare `python3 -m graphify .` is **not** a valid subcommand and exits 1. Rebuild after any structural change — the graph is a snapshot, and a stale one is worse than none because it answers confidently from deleted code.
+
+Two known rough edges: the graph exceeds the 5,000-node HTML limit, so `graph.html` is skipped unless you pass `--no-viz` or raise `GRAPHIFY_VIZ_NODE_LIMIT`; and `.sql` files contribute nothing without `pip install 'graphifyy[sql]'`, which means **[prisma/sql/enable-rls.sql](prisma/sql/enable-rls.sql) is invisible to the graph** — never treat a graph query as evidence about RLS coverage.
+
+### Context-efficiency invariant
+
+Prefer `graphify query` / `affected` over broad `grep -r` sweeps when the question is *structural* ("what calls this", "what breaks if I change this", "what is coupled to this"). The graph returns resolved call edges with `file:line`, which costs a fraction of the context of a recursive grep and does not invite guessing at file layout from partial matches.
+
+This is a preference, not a prohibition. `grep` remains correct for string-literal questions the AST does not model — Hebrew UI copy, enum label text, env var names, config keys — and for any file type the extractor skips. When the two disagree, **the code wins**: verify a graph claim by opening the cited `file:line` before acting on it.
+
 ## Slack Instructions Workflow
 
 1. **Slack command reader** — at the start of every session, or whenever asked to "check Slack," use the `slack` MCP tool (`mcp__slack__slack_get_channel_history`) to read the latest messages from the channel configured in `SLACK_NOTIFY_CHANNEL`. If the latest message contains a task, instruction, or feedback from the user, treat it as the session's main objective and execute it.
