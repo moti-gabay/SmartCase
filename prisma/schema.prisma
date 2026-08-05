@@ -669,3 +669,20 @@ model ChatMessage {
   @@index([conversationId, createdAt])
   @@map("chat_messages")
 }
+
+// ─── Plugin Marketplace ───────────────────────────────────────────────────────
+// Runtime enable/disable + config overrides for the notification and AI plugins.
+// The catalog itself is code-owned (src/lib/plugins/marketplace/catalog.ts) — a
+// row here only stores *state about* a known plugin, never a plugin definition.
+//
+// PROPOSED MIGRATION: run `npm run db:push`, then re-run prisma/sql/enable-rls.sql.
+// Until it is pushed the marketplace service falls back to env-only resolution.
+
+model InstalledPlugin {
+  pluginId      String   @id // matches the registry name: slack | telegram | anthropic | openai | ollama
+  isEnabled     Boolean  @default(false)
+  configOverlay Json     @default("{}") // env-var overrides merged over the process environment
+  updatedAt     DateTime @updatedAt
+
+  @@map("installed_plugins")
+}
