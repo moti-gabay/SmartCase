@@ -100,7 +100,7 @@ export type ParsedIntent =
   | { kind: "empty" };
 
 /** Commands this ingress answers. Anything else falls through to the AI path. */
-export const KNOWN_COMMANDS = ["status", "help", "run-tests"] as const;
+export const KNOWN_COMMANDS = ["status", "help", "run-tests", "plugins"] as const;
 export type KnownCommand = (typeof KNOWN_COMMANDS)[number];
 
 export function isKnownCommand(name: string): name is KnownCommand {

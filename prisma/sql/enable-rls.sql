@@ -31,3 +31,4 @@ ALTER TABLE public.conversion_references ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.meeting_slots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.installed_plugins ENABLE ROW LEVEL SECURITY;
