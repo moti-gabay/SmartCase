@@ -18,11 +18,18 @@ import {
   createPrismaPluginStateStore,
   type PrismaLike,
 } from "../../src/lib/plugins/marketplace/prisma-store";
-import { generateTextViaMarketplace, listPlugins } from "../../src/lib/plugins/marketplace/service";
+import {
+  disablePlugin,
+  enablePlugin,
+  generateTextViaMarketplace,
+  listPlugins,
+} from "../../src/lib/plugins/marketplace/service";
 import type { PluginStateStore } from "../../src/lib/plugins/marketplace/types";
-import { extractCaseReference, type KnownCommand } from "./guards";
+import { extractCaseReference, parsePluginId, type KnownCommand } from "./guards";
 import {
   formatError,
+  formatMissingPluginId,
+  formatPluginToggle,
   formatPlugins,
   formatStatus,
   formatTestResult,
@@ -240,8 +247,34 @@ export async function handlePlugins(): Promise<string> {
   }
 }
 
-/** No current command takes arguments; add a parameter when one does. */
-export async function runCommand(name: KnownCommand): Promise<string> {
+/**
+ * Flip a plugin on or off.
+ *
+ * The only writing command in the ingress, so it leans on the same single
+ * authorization gate as the rest (owner chat only, enforced in daemon.ts) and
+ * writes nothing but the plugin's own enabled flag — no config overlay is
+ * accepted from Telegram, so a message can never inject credentials or an
+ * endpoint override. An unknown id throws inside the service and is reported
+ * verbatim rather than being upserted as a dangling row.
+ */
+export async function handleSetPluginEnabled(
+  command: "enable" | "disable",
+  args: string
+): Promise<string> {
+  const pluginId = parsePluginId(args);
+  if (!pluginId) return formatMissingPluginId(command);
+
+  try {
+    const isEnabled = command === "enable";
+    const options = { store: marketplaceStore() };
+    await (isEnabled ? enablePlugin(pluginId, options) : disablePlugin(pluginId, options));
+    return formatPluginToggle(pluginId, isEnabled);
+  } catch (error) {
+    return formatError(`עדכון מצב התוסף ${pluginId} נכשל`, error);
+  }
+}
+
+export async function runCommand(name: KnownCommand, args = ""): Promise<string> {
   switch (name) {
     case "help":
       return HELP_TEXT;
@@ -251,5 +284,8 @@ export async function runCommand(name: KnownCommand): Promise<string> {
       return handleRunTests();
     case "plugins":
       return handlePlugins();
+    case "enable":
+    case "disable":
+      return handleSetPluginEnabled(name, args);
   }
 }

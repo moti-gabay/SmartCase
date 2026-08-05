@@ -100,7 +100,7 @@ export type ParsedIntent =
   | { kind: "empty" };
 
 /** Commands this ingress answers. Anything else falls through to the AI path. */
-export const KNOWN_COMMANDS = ["status", "help", "run-tests", "plugins"] as const;
+export const KNOWN_COMMANDS = ["status", "help", "run-tests", "plugins", "enable", "disable"] as const;
 export type KnownCommand = (typeof KNOWN_COMMANDS)[number];
 
 export function isKnownCommand(name: string): name is KnownCommand {
@@ -132,6 +132,26 @@ export function parseIntent(rawText: string | null | undefined): ParsedIntent {
   const args = boundary === -1 ? "" : body.slice(boundary).trim();
 
   return { kind: "command", name, args };
+}
+
+/**
+ * The plugin id argument of `/enable` / `/disable`, or null.
+ *
+ * Only the first whitespace-delimited token is read — a trailing tail is a typo,
+ * not a second target, and silently acting on the head of `/enable slack openai`
+ * would hide that. The id is lowercased (manifest ids are lowercase) and
+ * restricted to `[a-z0-9-]`: whether the id actually exists is the catalog's
+ * call, but anything outside that shape can never match one and is rejected
+ * here rather than round-tripping to the database.
+ */
+const PLUGIN_ID = /^[a-z0-9-]+$/;
+
+export function parsePluginId(args: string | null | undefined): string | null {
+  const tokens = String(args ?? "").trim().split(/\s+/).filter(Boolean);
+  if (tokens.length !== 1) return null;
+
+  const id = tokens[0].toLowerCase();
+  return PLUGIN_ID.test(id) ? id : null;
 }
 
 /**

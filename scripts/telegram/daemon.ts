@@ -95,7 +95,7 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
       return;
     }
     if (intent.name === "run-tests") await reply("🧪 מריץ בדיקות…");
-    await reply(await runCommand(intent.name));
+    await reply(await runCommand(intent.name, intent.args));
     return;
   }
 
