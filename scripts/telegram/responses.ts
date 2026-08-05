@@ -23,6 +23,8 @@ export const HELP_TEXT = [
   "/status — מצב הריפו: ענף, שינויים, קומיט אחרון",
   "/run-tests — הרצת חבילת הבדיקות (npm test)",
   "/plugins — מצב התוספים: פעילים, כבויים והגדרות חסרות",
+  "/enable <pluginId> — הפעלת תוסף, למשל /enable slack",
+  "/disable <pluginId> — כיבוי תוסף, למשל /disable openai",
   "/help — ההודעה הזו",
   "",
   "אפשר גם לשלוח משימה בשפה חופשית, למשל:",
@@ -133,6 +135,15 @@ export function formatPlugins(
   }
 
   return truncateForTelegram(lines.join("\n"));
+}
+
+export function formatPluginToggle(pluginId: string, isEnabled: boolean): string {
+  return isEnabled ? `🟢 התוסף ${pluginId} הופעל.` : `⚪ התוסף ${pluginId} כובה.`;
+}
+
+/** Shown for a missing, malformed, or multi-token plugin id argument. */
+export function formatMissingPluginId(command: string): string {
+  return `נדרש מזהה תוסף אחד.\n\nלמשל: /${command} slack`;
 }
 
 export function formatUnknownCommand(name: string): string {

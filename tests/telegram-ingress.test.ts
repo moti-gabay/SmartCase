@@ -8,10 +8,13 @@ import {
   isKnownCommand,
   normalizeId,
   parseIntent,
+  parsePluginId,
   KNOWN_COMMANDS,
   type TelegramUpdate,
 } from "../scripts/telegram/guards";
 import {
+  formatMissingPluginId,
+  formatPluginToggle,
   formatStatus,
   formatTestResult,
   formatUnknownCommand,
@@ -20,6 +23,12 @@ import {
   HELP_TEXT,
   TELEGRAM_MAX_MESSAGE,
 } from "../scripts/telegram/responses";
+import {
+  createMemoryStateStore,
+  disablePlugin,
+  enablePlugin,
+  listPlugins,
+} from "../src/lib/plugins/marketplace/service";
 
 const OWNER_CHAT = "123456789";
 const OTHER_CHAT = "987654321";
@@ -130,6 +139,59 @@ test("parseIntent reports empty for blank input", () => {
 test("isKnownCommand rejects anything unlisted", () => {
   assert.equal(isKnownCommand("deploy"), false);
   assert.equal(isKnownCommand("drop-database"), false);
+});
+
+// ── /enable and /disable ─────────────────────────────────────────────────────
+
+test("parseIntent splits /enable and /disable into the command and the plugin id", () => {
+  for (const command of ["enable", "disable"] as const) {
+    const intent = parseIntent(`/${command}@smartcase_bot  Slack `);
+    assert.equal(intent.kind, "command");
+    assert.equal(intent.kind === "command" && intent.name, command);
+    assert.equal(parsePluginId(intent.kind === "command" ? intent.args : ""), "slack");
+  }
+});
+
+test("parsePluginId lowercases a single well-formed id", () => {
+  assert.equal(parsePluginId("openai"), "openai");
+  assert.equal(parsePluginId("  Telegram  "), "telegram");
+  assert.equal(parsePluginId("some-plugin-2"), "some-plugin-2");
+});
+
+test("parsePluginId rejects missing, malformed and multi-token arguments", () => {
+  for (const args of ["", "   ", null, undefined, "slack openai", "slack;drop", "../etc", "שלום"]) {
+    assert.equal(parsePluginId(args), null, `expected null for ${JSON.stringify(args)}`);
+  }
+});
+
+test("formatMissingPluginId names the command it is coaching", () => {
+  assert.match(formatMissingPluginId("disable"), /\/disable slack/);
+});
+
+test("formatPluginToggle distinguishes on from off", () => {
+  assert.match(formatPluginToggle("slack", true), /🟢/);
+  assert.match(formatPluginToggle("slack", false), /⚪/);
+});
+
+test("/enable and /disable drive the marketplace state the /plugins view reports", async () => {
+  const store = createMemoryStateStore();
+  const env = { NOTIFICATION_PROVIDER: "telegram", AI_PROVIDER: "anthropic" };
+  const stateOf = async (id: string) =>
+    (await listPlugins({ store, env })).find((plugin) => plugin.manifest.id === id);
+
+  await enablePlugin("slack", { store });
+  assert.equal((await stateOf("slack"))?.isEnabled, true);
+
+  // A DB row wins over the env default — that is what makes /disable effective
+  // on a plugin the deployment turned on.
+  await disablePlugin("telegram", { store });
+  assert.equal((await stateOf("telegram"))?.isEnabled, false);
+});
+
+test("enabling an unknown plugin id throws instead of writing a dangling row", async () => {
+  const store = createMemoryStateStore();
+  await assert.rejects(() => enablePlugin("not-a-plugin", { store }), /Unknown plugin/);
+  assert.deepEqual(await store.list(), []);
 });
 
 // ── Case reference extraction ────────────────────────────────────────────────
