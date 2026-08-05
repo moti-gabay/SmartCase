@@ -18,6 +18,7 @@
     "db:studio": "prisma studio",
     "mcp:serve": "tsx scripts/mcp/server.ts",
     "slack-daemon": "node scripts/slack-daemon.js",
+    "telegram-daemon": "tsx scripts/telegram/daemon.ts",
     "autofix": "bash scripts/autofix/autofix.sh",
     "autofix:kill": "node scripts/autofix/kill.mjs"
   },
