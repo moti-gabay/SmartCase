@@ -4,11 +4,13 @@
 // for the wire format). fetch + reader instead of EventSource because the
 // endpoint requires a POST body.
 import { useCallback, useRef, useState } from "react";
+import type { IntentStatus, ProposedActionIntent } from "@/lib/ai/tools/types";
 
 export type ChatMessage = {
   id: string;
   role: "USER" | "ASSISTANT";
   content: string;
+  proposals?: ProposedActionIntent[];
 };
 
 type ChatStatus = "idle" | "streaming";
@@ -70,6 +72,10 @@ export function useChatStream() {
       { id: crypto.randomUUID(), role: "USER", content: message },
       { id: assistantId, role: "ASSISTANT", content: "" },
     ]);
+    const appendProposal = (intent: ProposedActionIntent) =>
+      setMessages((prev) =>
+        prev.map((m) => (m.id === assistantId ? { ...m, proposals: [...(m.proposals ?? []), intent] } : m))
+      );
     const appendDelta = (delta: string) =>
       setMessages((prev) =>
         prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m))
@@ -104,6 +110,7 @@ export function useChatStream() {
           if (event === "meta") conversationIdRef.current = String(data.conversationId);
           else if (event === "delta") appendDelta(String(data.text ?? ""));
           else if (event === "tool") setToolActive(data.status === "start");
+          else if (event === "proposal") appendProposal(data as unknown as ProposedActionIntent);
           else if (event === "error") setError(String(data.message ?? "אירעה שגיאה"));
         }
       }
@@ -116,11 +123,56 @@ export function useChatStream() {
       setToolActive(false);
       setStatus("idle");
       // Drop the placeholder if nothing streamed (error / instant abort).
-      setMessages((prev) => prev.filter((m) => m.id !== assistantId || m.content !== ""));
+      setMessages((prev) =>
+        prev.filter((m) => m.id !== assistantId || m.content !== "" || !!m.proposals?.length)
+      );
     }
   }, []);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
+
+  const patchProposal = useCallback((intentId: string, patch: Partial<ProposedActionIntent>) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.proposals?.some((p) => p.intentId === intentId)
+          ? { ...m, proposals: m.proposals.map((p) => (p.intentId === intentId ? { ...p, ...patch } : p)) }
+          : m
+      )
+    );
+  }, []);
+
+  // Human-in-the-Loop decision on a proposal card. Only the intent id travels —
+  // the server executes the params it persisted at proposal time.
+  // Returns an error string for a fixable 400 (bad card input) — the card
+  // stays PENDING and shows it inline; every other outcome is final.
+  const decide = useCallback(
+    async (
+      intentId: string,
+      decision: "APPROVE" | "CANCEL",
+      humanInput?: Record<string, string>
+    ): Promise<string | null> => {
+      try {
+        const res = await fetch("/api/ai/actions/execute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ intentId, decision, humanInput }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 400 || res.status === 429) return data.error ?? "הנתונים שהוזנו אינם תקינים";
+        const status: IntentStatus =
+          data.status ?? (res.status === 410 ? "EXPIRED" : res.status === 403 ? "DENIED" : "FAILED");
+        patchProposal(intentId, {
+          status,
+          resultMessage: data.message ?? data.error,
+          entityHref: data.entityHref,
+        });
+        return null;
+      } catch {
+        return "שגיאת רשת — נסה שוב";
+      }
+    },
+    [patchProposal]
+  );
 
   // "שיחה חדשה": next send() creates a fresh conversation server-side.
   const reset = useCallback(() => {
@@ -148,6 +200,7 @@ export function useChatStream() {
     hydrate,
     send,
     stop,
+    decide,
     reset,
     getConversationId,
     setConversationId,

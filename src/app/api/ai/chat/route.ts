@@ -13,6 +13,16 @@ import { prisma } from "@/lib/prisma";
 import { getGeminiClient } from "@/lib/ai/gemini";
 import { buildSystemPrompt } from "@/lib/ai/assistant-prompt";
 import { executeAssistantTool, getToolDeclarations } from "@/lib/ai/assistant-tools";
+import {
+  describeActions,
+  getActionDeclarations,
+  isActionTool,
+  loadIntentCards,
+  proposeAction,
+} from "@/lib/ai/tools/registry";
+import { INTENT_STATUS_NOTE, PHANTOM_PROPOSAL_WARNING, claimsPendingAction } from "@/lib/ai/tools/intent";
+import type { ProposedActionIntent } from "@/lib/ai/tools/types";
+import type { UserRole } from "@/types";
 import { collectPiiValues, maskPii, type PiiTag } from "@/lib/ai/pii-sanitizer";
 import {
   FALLBACK_TEXT,
@@ -33,6 +43,15 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+type ToolRecord = { name: string; ok: boolean; ms: number; intentId?: string };
+
+function intentIdsOf(toolCalls: unknown): string[] {
+  if (!Array.isArray(toolCalls)) return [];
+  return toolCalls
+    .map((t) => (t && typeof t === "object" ? (t as ToolRecord).intentId : undefined))
+    .filter((id): id is string => typeof id === "string");
+}
+
 // Full flash (not -lite): the agentic tool loop needs reliable multi-step
 // function calling; the other AI features stay on flash-lite.
 const CHAT_MODEL = "gemini-2.5-flash";
@@ -49,16 +68,25 @@ export async function GET() {
     select: {
       id: true,
       messages: {
-        select: { id: true, role: true, content: true, createdAt: true },
+        select: { id: true, role: true, content: true, toolCalls: true, createdAt: true },
         orderBy: { createdAt: "desc" },
         take: 50,
       },
     },
   });
 
+  const rows = conversation ? conversation.messages.reverse() : [];
+  // Proposal cards are rebuilt from the audit trail so they show the current
+  // status (executed / cancelled / expired), not the proposal-time one.
+  const cards = await loadIntentCards(rows.flatMap((m) => intentIdsOf(m.toolCalls)), session.user.id);
   return NextResponse.json({
     conversationId: conversation?.id ?? null,
-    messages: conversation ? conversation.messages.reverse() : [],
+    messages: rows.map(({ toolCalls, ...m }) => {
+      const proposals = intentIdsOf(toolCalls)
+        .map((id) => cards.get(id))
+        .filter((c): c is ProposedActionIntent => !!c);
+      return proposals.length ? { ...m, proposals } : m;
+    }),
   });
 }
 
@@ -118,13 +146,43 @@ export async function POST(req: Request) {
   // `user` content of the request, so no separate append is needed.
   const history = await prisma.chatMessage.findMany({
     where: { conversationId },
-    select: { role: true, content: true },
+    select: { role: true, content: true, toolCalls: true },
     orderBy: { createdAt: "desc" },
     take: HISTORY_MESSAGES,
   });
-  const contents: Content[] = history
-    .reverse()
-    .map((m) => ({ role: m.role === "USER" ? "user" : "model", parts: [{ text: m.content }] }));
+  // Tell the model how its earlier proposals ended — otherwise it cannot know
+  // whether "create the task" was approved, cancelled or left to expire.
+  const historyCards = await loadIntentCards(history.flatMap((m) => intentIdsOf(m.toolCalls)), userId);
+  // Proposals are replayed as the functionCall/functionResponse exchange they
+  // really were, with the final outcome in the response. Replaying them as
+  // plain text taught the model that "a proposal awaits approval" is something
+  // it can simply *say* — it then skipped the tool call on later requests.
+  // Args are not persisted (PII policy), so the replayed call carries none.
+  const contents: Content[] = history.reverse().flatMap((m): Content[] => {
+    const text: Content = { role: m.role === "USER" ? "user" : "model", parts: [{ text: m.content }] };
+    const cards = intentIdsOf(m.toolCalls)
+      .map((id) => historyCards.get(id))
+      .filter((c): c is ProposedActionIntent => !!c);
+    if (m.role === "USER" || cards.length === 0) return [text];
+    return [
+      { role: "model", parts: cards.map((c) => ({ functionCall: { name: c.tool, args: {} } })) },
+      {
+        role: "user",
+        parts: cards.map((c) => ({
+          functionResponse: {
+            name: c.tool,
+            response: {
+              status: "PENDING_APPROVAL",
+              summary: c.summaryHebrew,
+              finalOutcome: INTENT_STATUS_NOTE[c.status],
+              ...(c.resultMessage && { result: c.resultMessage }),
+            },
+          },
+        })),
+      },
+      text,
+    ];
+  });
 
   let aborted = false;
   req.signal.addEventListener("abort", () => {
@@ -156,7 +214,7 @@ export async function POST(req: Request) {
       // args is intentionally not tracked here — never persisted (see spec:
       // partial search fragments can't be reliably masked, so they're dropped
       // instead).
-      const toolRecords: { name: string; ok: boolean; ms: number }[] = [];
+      const toolRecords: ToolRecord[] = [];
       // PII values seen in tool results this turn (unmasked live — staff are
       // authorized), collected only to mask persisted assistant text.
       const collectedPii = new Map<string, PiiTag>();
@@ -165,8 +223,8 @@ export async function POST(req: Request) {
         send("meta", { conversationId });
         const ai = getGeminiClient();
         const config = {
-          systemInstruction: buildSystemPrompt(userName),
-          tools: [{ functionDeclarations: getToolDeclarations(role) }],
+          systemInstruction: buildSystemPrompt(userName, describeActions(role)),
+          tools: [{ functionDeclarations: [...getToolDeclarations(role), ...getActionDeclarations(role)] }],
           toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO } },
           temperature: 0.3,
         };
@@ -208,12 +266,31 @@ export async function POST(req: Request) {
             send("tool", { name, status: "start" });
             const started = Date.now();
             if (!deadlineHitMidBatch && Date.now() > deadline) deadlineHitMidBatch = true;
-            const result = deadlineHitMidBatch
-              ? { error: "תם הזמן הכולל שהוקצב לבדיקה" }
-              : await executeAssistantTool(name, (call.args ?? {}) as Record<string, unknown>, { role });
+            const args = (call.args ?? {}) as Record<string, unknown>;
+            let result: Record<string, unknown>;
+            let intentId: string | undefined;
+            if (deadlineHitMidBatch) {
+              result = { error: "תם הזמן הכולל שהוקצב לבדיקה" };
+            } else if (isActionTool(name)) {
+              // Mutations never run here — they become a persisted proposal
+              // the user must approve via /api/ai/actions/execute.
+              const proposal = await proposeAction(name, args, { id: userId, role: role as UserRole }, conversationId).catch(
+                (err) => {
+                  console.error(`[api/ai/chat] propose ${name} failed:`, err);
+                  return { modelResult: { error: "הכנת הפעולה נכשלה" } };
+                }
+              );
+              result = proposal.modelResult;
+              if ("intent" in proposal) {
+                intentId = proposal.intent.intentId;
+                send("proposal", proposal.intent);
+              }
+            } else {
+              result = await executeAssistantTool(name, args, { role });
+            }
             const ok = !("error" in result);
             collectPiiValues(result, collectedPii);
-            toolRecords.push({ name, ok, ms: Date.now() - started });
+            toolRecords.push({ name, ok, ms: Date.now() - started, ...(intentId && { intentId }) });
             send("tool", { name, status: "end", ok });
             responseParts.push({ functionResponse: { name, response: result } });
           }
@@ -227,7 +304,15 @@ export async function POST(req: Request) {
           }
         }
 
-        if (!fullText.trim() && !aborted) {
+        if (!toolRecords.some((t) => t.intentId) && claimsPendingAction(fullText)) {
+          fullText += PHANTOM_PROPOSAL_WARNING;
+          send("delta", { text: PHANTOM_PROPOSAL_WARNING });
+        }
+        // A proposal with no accompanying text still needs a persisted row —
+        // the card is linked to history through its toolCalls.
+        if (!fullText.trim() && toolRecords.some((t) => t.intentId)) {
+          fullText = "הכנתי הצעה לפעולה — אשר או בטל אותה בכרטיס.";
+        } else if (!fullText.trim() && !aborted) {
           fullText = FALLBACK_TEXT;
           send("error", { message: "לא התקבלה תשובה — נסה שוב" });
         }

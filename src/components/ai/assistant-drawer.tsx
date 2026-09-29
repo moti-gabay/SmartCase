@@ -7,6 +7,8 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { AudioLines, Loader2, Mic, MicOff, PhoneOff, Plus, Send, Sparkles, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatMarkdown } from "@/components/ai/chat-markdown";
+import { ActionCard } from "@/components/ai/action-card";
+import type { ProposedActionIntent } from "@/lib/ai/tools/types";
 import { useChatStream, type ChatMessage } from "@/components/ai/use-chat-stream";
 import { useVoiceInput } from "@/components/ai/use-voice-input";
 import { useLiveVoice } from "@/components/ai/use-live-voice";
@@ -68,6 +70,7 @@ export function AssistantDrawer() {
     hydrate,
     send,
     stop,
+    decide,
     reset,
     getConversationId,
     setConversationId,
@@ -116,6 +119,17 @@ export function AssistantDrawer() {
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages, toolActive, open, live.pending]);
+
+  // "תיקון": retire the current proposal and hand the composer back so the
+  // user can dictate or type the correction; the model then re-proposes.
+  const refine = useCallback(
+    (intent: ProposedActionIntent) => {
+      void decide(intent.intentId, "CANCEL");
+      setInput((prev) => prev || `תיקון להצעה "${intent.summaryHebrew}": `);
+      inputRef.current?.focus();
+    },
+    [decide]
+  );
 
   const submit = () => {
     const text = input.trim();
@@ -174,7 +188,12 @@ export function AssistantDrawer() {
                 </div>
               )}
               {messages.map((m) => (
-                <MessageBubble key={m.id} role={m.role} content={m.content} />
+                <div key={m.id} className="contents">
+                  {(m.content !== "" || !m.proposals?.length) && <MessageBubble role={m.role} content={m.content} />}
+                  {m.proposals?.map((p) => (
+                    <ActionCard key={p.intentId} intent={p} onDecide={decide} onRefine={refine} />
+                  ))}
+                </div>
               ))}
               {live.pending.map((t, i) => (
                 <MessageBubble key={`live-${i}`} role={t.role} content={t.text} provisional />

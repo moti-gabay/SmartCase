@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/../auth";
-import { prisma } from "@/lib/prisma";
 import { deleteTaskSchema, updateTaskSchema } from "@/lib/schemas/task-schema";
 import {
   TASK_REASON_FORBIDDEN,
@@ -9,8 +8,8 @@ import {
   deleteTask,
   updateTask,
   type TaskActor,
-  type TaskPorts,
 } from "@/lib/workflows/task-management";
+import { buildTaskPorts as buildPorts } from "@/lib/workflows/task-ports";
 import type { UserRole } from "@/types";
 
 // Staff-only task mutation: edit a task's fields (PATCH) or remove it (DELETE).
@@ -43,43 +42,6 @@ async function resolveActor(): Promise<{ actor: TaskActor } | { denied: NextResp
     return { denied: NextResponse.json({ error: "אין הרשאה" }, { status: 403 }) };
   }
   return { actor: { id: session.user.id, role } };
-}
-
-function buildPorts(): TaskPorts {
-  return {
-    findTask: async (id) => {
-      const row = await prisma.task.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          caseId: true,
-          createdById: true,
-          assignedToId: true,
-          status: true,
-          completedAt: true,
-          case: { select: { assignedAgentId: true } },
-        },
-      });
-      if (!row) return null;
-      return {
-        id: row.id,
-        caseId: row.caseId,
-        createdById: row.createdById,
-        assignedToId: row.assignedToId,
-        status: row.status,
-        completedAt: row.completedAt,
-        caseAssignedAgentId: row.case.assignedAgentId,
-      };
-    },
-    assigneeExists: async (userId) =>
-      (await prisma.user.count({ where: { id: userId } })) > 0,
-    updateTask: async (id, patch) => {
-      await prisma.task.update({ where: { id }, data: patch });
-    },
-    deleteTask: async (id) => {
-      await prisma.task.delete({ where: { id } });
-    },
-  };
 }
 
 // NOT_FOUND → 404, every other refusal → 403/400. A caller who may not touch
