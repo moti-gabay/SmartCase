@@ -11,6 +11,12 @@ const nextConfig: NextConfig = {
       // { protocol: "https", hostname: "smartcase-documents.s3.il-central-1.amazonaws.com" },
     ],
   },
+
+  // Mic is used only by the assistant's dictation and the portal's story
+  // recorder, both same-origin; deny it to any embedded third-party frame.
+  async headers() {
+    return [{ source: "/:path*", headers: [{ key: "Permissions-Policy", value: "microphone=(self)" }] }];
+  },
 };
 
 export default nextConfig;

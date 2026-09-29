@@ -4,10 +4,11 @@
 // a side drawer. Mounted once in the dashboard layout so it is available on
 // every staff route.
 import { memo, useEffect, useRef, useState } from "react";
-import { Loader2, Plus, Send, Sparkles, Square, X } from "lucide-react";
+import { Loader2, Mic, MicOff, Plus, Send, Sparkles, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatMarkdown } from "@/components/ai/chat-markdown";
 import { useChatStream, type ChatMessage } from "@/components/ai/use-chat-stream";
+import { useVoiceInput } from "@/components/ai/use-voice-input";
 import { useEscapeKey } from "@/hooks/use-escape-key";
 
 // memo: only the actively-streaming message's content changes per SSE chunk —
@@ -42,7 +43,22 @@ export function AssistantDrawer() {
   const [input, setInput] = useState("");
   const { messages, status, toolActive, error, hydrate, send, stop, reset } = useChatStream();
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const streaming = status === "streaming";
+  // Dictation only fills the textarea — the agent reviews and sends as usual,
+  // so the transcript goes through the chat route's maskPii like typed text.
+  const voice = useVoiceInput((text) => {
+    setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${text}` : text));
+    inputRef.current?.focus();
+  });
+  const voiceBusy = voice.status === "LISTENING" || voice.status === "PROCESSING";
+  const cancelVoice = voice.cancel;
+
+  // The drawer stays mounted when closed, so closing (incl. Esc) must discard
+  // an in-flight recording and release the mic explicitly.
+  useEffect(() => {
+    if (!open) cancelVoice();
+  }, [open, cancelVoice]);
 
   useEffect(() => {
     if (open) hydrate();
@@ -57,7 +73,7 @@ export function AssistantDrawer() {
 
   const submit = () => {
     const text = input.trim();
-    if (!text || streaming) return;
+    if (!text || streaming || voiceBusy) return;
     setInput("");
     send(text);
   };
@@ -124,8 +140,11 @@ export function AssistantDrawer() {
             {/* Composer */}
             <div className="border-t border-slate-200 p-3">
               {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
+              {voice.error && <p className="mb-2 text-xs text-red-600">{voice.error}</p>}
               <div className="flex items-end gap-2">
                 <textarea
+                  ref={inputRef}
+                  dir="auto"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -135,9 +154,29 @@ export function AssistantDrawer() {
                     }
                   }}
                   rows={2}
-                  placeholder="כתוב שאלה..."
+                  placeholder={voice.status === "LISTENING" ? "מקליט..." : "כתוב שאלה..."}
                   className="flex-1 resize-none rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
                 />
+                <button
+                  onClick={voice.status === "LISTENING" ? voice.stop : voice.start}
+                  disabled={streaming || voice.status === "PROCESSING" || voice.status === "REQUESTING_PERMISSIONS"}
+                  className={cn(
+                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg disabled:opacity-40",
+                    voice.status === "LISTENING"
+                      ? "animate-pulse bg-red-600 text-white hover:bg-red-700"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  )}
+                  aria-label={voice.status === "LISTENING" ? "עצור הקלטה" : "הקלטת שאלה"}
+                  title={voice.status === "PERMISSION_DENIED" ? voice.error ?? undefined : undefined}
+                >
+                  {voice.status === "PROCESSING" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : voice.status === "PERMISSION_DENIED" ? (
+                    <MicOff className="h-4 w-4" />
+                  ) : (
+                    <Mic className="h-4 w-4" />
+                  )}
+                </button>
                 {streaming ? (
                   <button
                     onClick={stop}
@@ -149,7 +188,7 @@ export function AssistantDrawer() {
                 ) : (
                   <button
                     onClick={submit}
-                    disabled={!input.trim()}
+                    disabled={!input.trim() || voiceBusy}
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
                     aria-label="שלח"
                   >
