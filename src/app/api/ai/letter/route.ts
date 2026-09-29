@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/../auth";
 import { prisma } from "@/lib/prisma";
-import { generateHebrewLetter } from "@/lib/ai/gemini";
-import { CASE_TYPE_LABELS, LETTER_TYPE_LABELS, LETTER_TYPE_INSTRUCTIONS } from "@/lib/constants";
-
-const VALID_TYPES = Object.keys(LETTER_TYPE_LABELS);
+import { generateLetter } from "@/lib/services/letters";
 
 // List saved letters for a case.
 export async function GET(req: Request) {
@@ -42,49 +39,20 @@ export async function POST(req: Request) {
     const { caseId, letterType, context } = await req.json();
     if (!caseId) return NextResponse.json({ error: "חסר מזהה תיק" }, { status: 400 });
 
-    const type = VALID_TYPES.includes(letterType) ? letterType : "CLAIM_REQUEST";
-
-    const c = await prisma.case.findUnique({
-      where: { id: caseId },
-      include: { client: true, assignedAgent: { select: { name: true } } },
+    const letter = await generateLetter({
+      caseId,
+      letterType,
+      context: typeof context === "string" ? context : undefined,
+      actor: { id: session.user.id, name: session.user.name },
     });
-    if (!c) return NextResponse.json({ error: "התיק לא נמצא" }, { status: 404 });
-
-    const content = await generateHebrewLetter({
-      clientName: c.client.fullName,
-      nationalId: c.client.nationalId,
-      dateOfBirth: c.client.dateOfBirth.toLocaleDateString("he-IL"),
-      primaryCondition: c.client.primaryCondition ?? "לא צוין",
-      recognizedPercentage: c.client.recognizedPercentage ?? undefined,
-      claimedPercentage: c.claimedPercentage ?? undefined,
-      claimDescription: c.claimDescription ?? undefined,
-      caseType: CASE_TYPE_LABELS[c.caseType] ?? c.caseType,
-      caseNumber: c.caseNumber,
-      agentName: c.assignedAgent?.name ?? session.user.name ?? "צוות SmartCase",
-      letterTypeLabel: LETTER_TYPE_LABELS[type],
-      letterPurpose: LETTER_TYPE_INSTRUCTIONS[type],
-      context: typeof context === "string" && context.trim() ? context.trim() : undefined,
-    });
-
-    const title = `${LETTER_TYPE_LABELS[type]} – ${c.client.fullName}`;
-    const saved = await prisma.generatedLetter.create({
-      data: {
-        caseId,
-        createdById: session.user.id,
-        letterType: type as never,
-        title,
-        content,
-        context: typeof context === "string" && context.trim() ? context.trim() : null,
-      },
-      select: { id: true, createdAt: true },
-    });
+    if (!letter) return NextResponse.json({ error: "התיק לא נמצא" }, { status: 404 });
 
     return NextResponse.json({
-      id: saved.id,
-      letterType: type,
-      title,
-      content,
-      createdAt: saved.createdAt.toISOString(),
+      id: letter.id,
+      letterType: letter.letterType,
+      title: letter.title,
+      content: letter.content,
+      createdAt: letter.createdAt.toISOString(),
     });
   } catch (err) {
     console.error("[ai/letter]", err);

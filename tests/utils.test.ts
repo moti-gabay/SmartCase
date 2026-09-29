@@ -59,3 +59,14 @@ test("generateCaseNumber matches SC-YYYY-NNNNN", () => {
   assert.match(n, /^SC-\d{4}-\d{5}$/);
   assert.ok(n.startsWith(`SC-${new Date().getFullYear()}-`));
 });
+
+test("toAiValidation: passes the validator shape, drops the analysis shape", async () => {
+  const { toAiValidation } = await import("../src/lib/utils");
+  const validator = { isValid: true, summary: "תקין", issues: [], recommendations: ["x"], documentAge: "3 חודשים" };
+  assert.deepEqual(toAiValidation(validator), validator);
+  // The document-analysis automation writes this into the same column.
+  const analysis = { documentType: "OTHER", missingDocuments: [], courtHearingDate: null, requiresManagerAttention: false, managerNotes: null };
+  assert.equal(toAiValidation(analysis), undefined);
+  assert.equal(toAiValidation(null), undefined);
+  assert.equal(toAiValidation({ isValid: true, summary: "s", issues: "bad", recommendations: [] }), undefined);
+});

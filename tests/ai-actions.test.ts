@@ -336,3 +336,11 @@ test("claimsPendingAction: flags phantom 'awaiting approval' claims, not ordinar
   assert.equal(claimsPendingAction("יש 3 תיקים באיחור."), false);
   assert.equal(claimsPendingAction("איזה מספר תיק לשייך לדנה?"), false);
 });
+
+test("israelDateTimeToUtc: honours IDT (UTC+3) and IST (UTC+2)", async () => {
+  const { israelDateTimeToUtc } = await import("../src/lib/ai/tools/intent");
+  assert.equal(israelDateTimeToUtc("2026-10-06", "10:00").toISOString(), "2026-10-06T07:00:00.000Z");
+  assert.equal(israelDateTimeToUtc("2026-12-15", "10:00").toISOString(), "2026-12-15T08:00:00.000Z");
+  // Day after the October 2026 fall-back (Oct 25) is already IST.
+  assert.equal(israelDateTimeToUtc("2026-10-26", "09:30").toISOString(), "2026-10-26T07:30:00.000Z");
+});

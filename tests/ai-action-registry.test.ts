@@ -21,7 +21,9 @@ const registry = () => import("../src/lib/ai/tools/registry");
 
 const ALL = ["create_task", "update_task", "delete_task",
   "create_case", "update_case", "change_case_status", "delete_case", "add_case_tag", "remove_case_tag", "generate_portal_link",
-  "create_client", "update_client", "delete_client"];
+  "create_client", "update_client", "delete_client",
+  "create_slot", "book_slot", "reschedule_meeting", "cancel_meeting", "delete_slot",
+  "generate_letter", "refine_letter", "analyze_document", "review_document", "delete_document"];
 
 test("registry: every action is registered, and name == declaration name", async () => {
   const { getAction } = await registry();
@@ -33,7 +35,7 @@ test("registry: every action is registered, and name == declaration name", async
   }
 });
 
-test("registry: every DELETE is destructive and no destructive action reaches AGENT", async () => {
+test("registry: every DELETE is destructive; cascading deletes never reach AGENT", async () => {
   const { getAction } = await registry();
   for (const name of ALL) {
     const def = getAction(name)!;
@@ -71,4 +73,21 @@ test("registry: unknown and prototype names do not resolve", async () => {
     assert.equal(getAction(name), undefined);
     assert.equal(isActionTool(name), false);
   }
+});
+
+test("registry: review_document refuses a rejection without a reason (model must ask)", async () => {
+  const { getAction } = await registry();
+  const schema = getAction("review_document")!.argsSchema;
+  const base = { caseNumber: "SC-1", document: "ת\"ז" };
+  assert.equal(schema.safeParse({ ...base, decision: "REJECTED" }).success, false);
+  assert.equal(schema.safeParse({ ...base, decision: "REJECTED", reason: "מטושטש" }).success, true);
+  assert.equal(schema.safeParse({ ...base, decision: "APPROVED" }).success, true);
+});
+
+test("registry: appointment args take Israel wall-clock HH:MM, not free text", async () => {
+  const { getAction } = await registry();
+  const schema = getAction("book_slot")!.argsSchema;
+  assert.equal(schema.safeParse({ caseNumber: "SC-1", date: "2026-10-06", time: "10:00" }).success, true);
+  assert.equal(schema.safeParse({ caseNumber: "SC-1", date: "2026-10-06", time: "10am" }).success, false);
+  assert.equal(schema.safeParse({ caseNumber: "SC-1", date: "6/10", time: "10:00" }).success, false);
 });

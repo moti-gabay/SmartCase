@@ -42,3 +42,17 @@ test("capToolResult truncates oversized results with an explicit flag", () => {
   assert.equal(typeof capped.data, "string");
   assert.equal((capped.data as string).length, TOOL_RESULT_MAX_CHARS);
 });
+
+test("trimToUserStart: history always opens on a user turn", async () => {
+  const { trimToUserStart } = await import("../src/lib/ai/chat-protocol");
+  const call = { role: "model", parts: [{ functionCall: { name: "x" } }] };
+  const resp = { role: "user", parts: [{ functionResponse: { name: "x" } }] };
+  const text = { role: "model", parts: [{ text: "ok" }] };
+  const user = { role: "user", parts: [{ text: "q" }] };
+  // A window opening mid-replay drops the model turns AND the orphaned
+  // functionResponse (a "user" turn Gemini rejects without its call).
+  assert.deepEqual(trimToUserStart([text, call, resp, text, user]), [user]);
+  assert.deepEqual(trimToUserStart([resp, text, user, call, resp, text]), [user, call, resp, text]);
+  assert.deepEqual(trimToUserStart([user, text]), [user, text]);
+  assert.deepEqual(trimToUserStart([text]), []);
+});

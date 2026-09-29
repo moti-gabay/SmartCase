@@ -35,6 +35,7 @@ import {
   STREAM_DEADLINE_MS,
   sliceMaskSafe,
   sseEncode,
+  trimToUserStart,
   type ChatSseEvent,
 } from "@/lib/ai/chat-protocol";
 
@@ -183,6 +184,7 @@ export async function POST(req: Request) {
       text,
     ];
   });
+  trimToUserStart(contents);
 
   let aborted = false;
   req.signal.addEventListener("abort", () => {

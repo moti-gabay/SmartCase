@@ -17,8 +17,8 @@ import {
   createMeetingSlots,
   deleteMeetingSlot,
   generateRecurringSlots,
-  type MeetingSlotPorts,
 } from "@/lib/workflows/meeting-slot-management";
+import { buildMeetingSlotPorts as buildPorts } from "@/lib/services/meeting-slots";
 import type { UserRole } from "@/types";
 
 // Staff-only meeting-slot administration: list the office calendar, open new
@@ -200,50 +200,4 @@ export async function DELETE(req: Request) {
     console.error("[staff/meeting-slots:DELETE]", err);
     return NextResponse.json({ error: "מחיקת המועד נכשלה" }, { status: 500 });
   }
-}
-
-// Real ports. The overlap check reads the window the engine asks about, and the
-// batch insert is one transaction so a partially-written recurring series can
-// never be left behind.
-function buildPorts(): MeetingSlotPorts {
-  return {
-    listSlotsInRange: async (from, to) => {
-      const rows = await prisma.meetingSlot.findMany({
-        where: { startsAt: { gte: from, lte: to } },
-        select: { id: true, startsAt: true, durationMinutes: true },
-        orderBy: { startsAt: "asc" },
-      });
-      return rows;
-    },
-
-    // One transaction for the whole batch: a half-written recurring series is
-    // worse than none, since the staff console would show gaps it cannot explain.
-    createSlots: async (slots) => {
-      if (slots.length === 0) return [];
-      await prisma.$transaction(
-        slots.map((slot) =>
-          prisma.meetingSlot.create({
-            data: {
-              startsAt: slot.startsAt,
-              durationMinutes: slot.durationMinutes,
-              location: slot.location ?? null,
-              isPublished: slot.isPublished,
-            },
-            select: { id: true },
-          }),
-        ),
-      );
-      return slots;
-    },
-
-    findSlot: async (id) =>
-      prisma.meetingSlot.findUnique({
-        where: { id },
-        select: { id: true, startsAt: true, durationMinutes: true, bookedCaseId: true },
-      }),
-
-    deleteSlot: async (id) => {
-      await prisma.meetingSlot.delete({ where: { id } });
-    },
-  };
 }

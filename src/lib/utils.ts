@@ -47,3 +47,32 @@ export function generateCaseNumber(): string {
   const seq = Math.floor(Math.random() * 99999).toString().padStart(5, "0");
   return `SC-${year}-${seq}`;
 }
+
+type AiValidation = {
+  isValid: boolean;
+  issues: string[];
+  recommendations: string[];
+  documentAge?: string;
+  summary: string;
+};
+
+const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+
+// Document.aiValidation is a Json column written by two features with different
+// shapes: the document validator ({ isValid, summary, issues, … }) and the
+// document-analysis automation ({ documentType, missingDocuments, … }). Only the
+// validator shape is renderable — anything else would crash the checklist panel
+// and read as "invalid" (isValid undefined), so it is dropped here.
+export function toAiValidation(raw: unknown): AiValidation | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const v = raw as Record<string, unknown>;
+  if (typeof v.isValid !== "boolean" || typeof v.summary !== "string") return undefined;
+  if (!isStringArray(v.issues) || !isStringArray(v.recommendations)) return undefined;
+  return {
+    isValid: v.isValid,
+    summary: v.summary,
+    issues: v.issues,
+    recommendations: v.recommendations,
+    ...(typeof v.documentAge === "string" ? { documentAge: v.documentAge } : {}),
+  };
+}

@@ -18,6 +18,7 @@ import {
   USER_STATUS_LABELS,
 } from "@/lib/constants";
 import { capToolResult, clampLimit, TOOL_TIMEOUT_MS } from "@/lib/ai/chat-protocol";
+import { SLOT_MIN_LEAD_MS } from "@/lib/portal/journey";
 
 type ToolResult = Record<string, unknown>;
 type ToolArgs = Record<string, unknown>;
@@ -259,6 +260,34 @@ async function getTaskLoad(args: ToolArgs): Promise<ToolResult> {
   return { results: rows };
 }
 
+// Free, published, bookable slots — what book_slot / reschedule_meeting can
+// target. Times are rendered in Israel wall-clock time, the format those
+// actions take back.
+async function getAvailableSlots(args: ToolArgs): Promise<ToolResult> {
+  const days = Math.min(Math.max(typeof args.days === "number" ? Math.trunc(args.days) : 14, 1), 60);
+  const from = new Date(Date.now() + SLOT_MIN_LEAD_MS);
+  const rows = await prisma.meetingSlot.findMany({
+    where: {
+      isPublished: true,
+      bookedCaseId: null,
+      startsAt: { gte: from, lte: new Date(from.getTime() + days * 86_400_000) },
+    },
+    select: { startsAt: true, durationMinutes: true, location: true },
+    orderBy: { startsAt: "asc" },
+    take: 30,
+  });
+  if (rows.length === 0) return { results: [], note: "אין מועדים פנויים בטווח — אפשר לפרסם מועד חדש (create_slot)" };
+  const il = (d: Date, opts: Intl.DateTimeFormatOptions) => d.toLocaleString("en-CA", { timeZone: "Asia/Jerusalem", ...opts });
+  return {
+    results: rows.map((r) => ({
+      date: il(r.startsAt, { year: "numeric", month: "2-digit", day: "2-digit" }),
+      time: il(r.startsAt, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }),
+      durationMinutes: r.durationMinutes,
+      location: r.location,
+    })),
+  };
+}
+
 // ADMIN only — gated in getToolDeclarations AND re-checked in the dispatcher.
 async function getUserStats(): Promise<ToolResult> {
   const [byRole, byStatus, pending] = await Promise.all([
@@ -360,6 +389,15 @@ const BASE_DECLARATIONS: FunctionDeclaration[] = [
     },
   },
   {
+    name: "get_available_slots",
+    description:
+      "מועדי פגישה פנויים ביומן (מפורסמים, לא תפוסים, לפחות 24 שעות קדימה), בשעון ישראל — אלה המועדים שאפשר לקבוע או להזיז אליהם פגישה.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: { days: { type: Type.INTEGER, description: "כמה ימים קדימה לבדוק (ברירת מחדל 14, עד 60)" } },
+    },
+  },
+  {
     name: "get_alerts",
     description: "ההתראות הפעילות: תיקים באיחור, מועדי הגשה מתקרבים, מסמכים חסרים.",
     parameters: { type: Type.OBJECT, properties: {} },
@@ -386,6 +424,7 @@ const EXECUTORS: Record<string, (args: ToolArgs) => Promise<ToolResult>> = {
   get_case_metrics: getCaseMetrics,
   get_document_summary: getDocumentSummary,
   get_task_load: getTaskLoad,
+  get_available_slots: getAvailableSlots,
   get_alerts: () => getAlerts().then((alerts) => ({ results: alerts })),
   get_user_stats: getUserStats,
 };
