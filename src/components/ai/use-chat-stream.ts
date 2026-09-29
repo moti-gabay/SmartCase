@@ -130,5 +130,27 @@ export function useChatStream() {
     setError(null);
   }, []);
 
-  return { messages, status, toolActive, error, hydrate, send, stop, reset };
+  // Live Voice Mode shares this thread: it reads/adopts the conversation id
+  // and appends its committed transcript turns locally (no refetch).
+  const getConversationId = useCallback(() => conversationIdRef.current, []);
+  const setConversationId = useCallback((id: string) => {
+    conversationIdRef.current = id;
+  }, []);
+  const appendMessages = useCallback((turns: Omit<ChatMessage, "id">[]) => {
+    setMessages((prev) => [...prev, ...turns.map((t) => ({ ...t, id: crypto.randomUUID() }))]);
+  }, []);
+
+  return {
+    messages,
+    status,
+    toolActive,
+    error,
+    hydrate,
+    send,
+    stop,
+    reset,
+    getConversationId,
+    setConversationId,
+    appendMessages,
+  };
 }
