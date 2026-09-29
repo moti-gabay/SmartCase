@@ -14,6 +14,19 @@ export const HISTORY_MESSAGES = 20;
 export const STORED_MESSAGE_MAX_CHARS = 8000;
 export const RATE_LIMIT_MESSAGES_PER_MINUTE = 10;
 
+// Persisted whenever the model produced no usable answer (failure or empty
+// output) so an ASSISTANT row always follows the USER row it responds to —
+// otherwise the next turn's history has two consecutive "user" contents,
+// which Gemini's multi-turn API isn't built to handle.
+export const FALLBACK_TEXT = "מצטער, אירעה שגיאה ולא הצלחתי לענות. נסה לשלוח את השאלה שוב.";
+
+// Slice to maxLen, then strip a trailing unclosed "[...]" mask-tag fragment
+// the cut could otherwise leave behind (masking can inflate length near the
+// boundary, e.g. a 9-digit id becoming the longer "[תז_ממוסכת]" tag).
+export function sliceMaskSafe(text: string, maxLen: number): string {
+  return text.slice(0, maxLen).replace(/\[[^\]]*$/, "");
+}
+
 export type ChatSseEvent = "meta" | "delta" | "tool" | "done" | "error";
 
 // `event: <type>\ndata: <one-line JSON>\n\n` — JSON.stringify never emits raw

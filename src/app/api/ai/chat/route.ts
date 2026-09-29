@@ -15,6 +15,7 @@ import { buildSystemPrompt } from "@/lib/ai/assistant-prompt";
 import { executeAssistantTool, getToolDeclarations } from "@/lib/ai/assistant-tools";
 import { collectPiiValues, maskPii, type PiiTag } from "@/lib/ai/pii-sanitizer";
 import {
+  FALLBACK_TEXT,
   HEARTBEAT_MS,
   HISTORY_MESSAGES,
   MAX_MESSAGE_CHARS,
@@ -22,6 +23,7 @@ import {
   RATE_LIMIT_MESSAGES_PER_MINUTE,
   STORED_MESSAGE_MAX_CHARS,
   STREAM_DEADLINE_MS,
+  sliceMaskSafe,
   sseEncode,
   type ChatSseEvent,
 } from "@/lib/ai/chat-protocol";
@@ -34,19 +36,6 @@ export const maxDuration = 60;
 // Full flash (not -lite): the agentic tool loop needs reliable multi-step
 // function calling; the other AI features stay on flash-lite.
 const CHAT_MODEL = "gemini-2.5-flash";
-
-// Persisted whenever the model produced no usable answer (failure or empty
-// output) so an ASSISTANT row always follows the USER row it responds to —
-// otherwise the next turn's history has two consecutive "user" contents,
-// which Gemini's multi-turn API isn't built to handle.
-const FALLBACK_TEXT = "מצטער, אירעה שגיאה ולא הצלחתי לענות. נסה לשלוח את השאלה שוב.";
-
-// Slice to maxLen, then strip a trailing unclosed "[...]" mask-tag fragment
-// the cut could otherwise leave behind (masking can inflate length near the
-// boundary, e.g. a 9-digit id becoming the longer "[תז_ממוסכת]" tag).
-function sliceMaskSafe(text: string, maxLen: number): string {
-  return text.slice(0, maxLen).replace(/\[[^\]]*$/, "");
-}
 
 export async function GET() {
   const session = await auth();
