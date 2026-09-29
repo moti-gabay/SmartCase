@@ -42,3 +42,23 @@ export async function resolveTask(
   if (rows.length === 0) return { error: `לא נמצאה בתיק משימה התואמת "${titleQuery}"` };
   return { error: "נמצאו כמה משימות תואמות — בקש מהמשתמש לבחור", candidates: rows.map((r) => r.title) };
 }
+
+// Candidates carry case numbers, never ids or national IDs — enough for the
+// user to pick, nothing the model should not see.
+export async function resolveClient(
+  name: string
+): Promise<Resolved<{ id: string; fullName: string; caseNumbers: string[] }>> {
+  const rows = await prisma.client.findMany({
+    where: { fullName: { contains: name, mode: "insensitive" } },
+    select: { id: true, fullName: true, cases: { select: { caseNumber: true }, take: 5 } },
+    take: 6,
+  });
+  const shaped = rows.map((r) => ({ id: r.id, fullName: r.fullName, caseNumbers: r.cases.map((c) => c.caseNumber) }));
+  const exact = shaped.filter((r) => r.fullName === name);
+  if (exact.length === 1 || shaped.length === 1) return { value: exact[0] ?? shaped[0] };
+  if (shaped.length === 0) return { error: `לא נמצא לקוח בשם "${name}"` };
+  return {
+    error: `נמצאו כמה לקוחות בשם "${name}" — בקש מהמשתמש לבחור (לפי מספר תיק)`,
+    candidates: shaped.map((r) => `${r.fullName} (תיקים: ${r.caseNumbers.join(", ") || "אין"})`),
+  };
+}

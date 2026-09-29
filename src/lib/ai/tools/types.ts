@@ -29,8 +29,19 @@ export interface ActionActor {
 // [Hebrew label, display value] — order is the order the card renders.
 export type DisplayParam = [string, string];
 
+// A value the human types into the card (never the model) — PII that
+// maskPii hides from the LLM, e.g. national ID / phone / email. Values travel
+// only in the approval request and are validated by the action's humanSchema.
+export interface HumanField {
+  key: string;
+  label: string;
+  required: boolean;
+  inputType: "text" | "tel" | "email";
+  hint?: string;
+}
+
 export type ResolveResult<P> =
-  | { params: P; summaryHebrew: string; displayParams: DisplayParam[] }
+  | { params: P; summaryHebrew: string; displayParams: DisplayParam[]; humanFields?: HumanField[] }
   // `candidates` lets the model ask the user to disambiguate instead of guessing.
   | { error: string; candidates?: string[] };
 
@@ -54,7 +65,10 @@ export interface ActionDefinition<P = unknown> {
   resolve(args: unknown, actor: ActionActor): Promise<ResolveResult<P>>;
   // Re-validates the params reloaded from the proposal row before execution.
   paramsSchema: z.ZodType<P>;
-  execute(params: P, actor: ActionActor): Promise<ExecResult>;
+  // Validates human-typed values; every key optional here — which keys are
+  // required is decided per proposal by the humanFields resolve returned.
+  humanSchema?: z.ZodType<Record<string, string | undefined>>;
+  execute(params: P, actor: ActionActor, human: Record<string, string | undefined>): Promise<ExecResult>;
 }
 
 // What the chat stream sends to the drawer, and what history rehydrates.
@@ -65,6 +79,7 @@ export interface ProposedActionIntent {
   action: ActionVerb;
   summaryHebrew: string;
   displayParams: DisplayParam[];
+  humanFields?: HumanField[];
   destructive: boolean;
   expiresAt: string;
   status: IntentStatus;

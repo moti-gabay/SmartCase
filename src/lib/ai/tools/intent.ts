@@ -25,7 +25,34 @@ export const DECIDED_ACTIONS: readonly string[] = [AUDIT.APPROVED, AUDIT.CANCELL
 export const executeBodySchema = z.object({
   intentId: z.string().min(1).max(64),
   decision: z.enum(["APPROVE", "CANCEL"]),
+  // Card-typed values for the proposal's humanFields (PII the model never saw).
+  humanInput: z.record(z.string().max(40), z.string().max(300)).optional(),
 });
+
+// Checks card-typed input against the fields the proposal asked for: no extra
+// keys, every required key present and non-blank. Blank optional values are
+// dropped. Format validation is the action's humanSchema, applied after.
+export function pickHumanInput(
+  fields: readonly { key: string; required: boolean }[],
+  input: Record<string, string> | undefined
+): { values: Record<string, string> } | { error: string } {
+  const allowed = new Set(fields.map((f) => f.key));
+  const values: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(input ?? {})) {
+    if (!allowed.has(key)) return { error: "התקבל שדה לא צפוי" };
+    const v = raw.trim();
+    if (v) values[key] = v;
+  }
+  const missing = fields.find((f) => f.required && !values[f.key]);
+  return missing ? { error: "יש למלא את כל שדות החובה בכרטיס" } : { values };
+}
+
+// Only Hebrew messages are user-facing copy; anything else (e.g. "Case not
+// found" from a shared action) is an internal detail and gets the generic text.
+export function userFacingError(err: unknown, fallback: string): string {
+  const msg = err instanceof Error ? err.message : "";
+  return /[\u0590-\u05FF]/.test(msg) && msg.length <= 200 ? msg : fallback;
+}
 
 export function intentExpiresAt(proposedAt: Date): Date {
   return new Date(proposedAt.getTime() + INTENT_TTL_MS);
@@ -67,6 +94,18 @@ export const INTENT_STATUS_NOTE: Record<IntentStatus, string> = {
   DENIED: "נדחתה — אין הרשאה",
   EXPIRED: "פג תוקפה ללא אישור",
 };
+
+// Safety net for a model that *says* an action awaits approval without having
+// called a tool this turn (seen in manual E2E). The prompt forbids it; this
+// guarantees the user is never left believing a phantom card exists.
+const PENDING_CLAIM_RE = /ממתינ[הו]\s+לאישור|אשר\s+או\s+בטל|בכרטיס\s+האישור|בוצעה\s+לאחר\s+אישור/;
+
+export function claimsPendingAction(text: string): boolean {
+  return PENDING_CLAIM_RE.test(text);
+}
+
+export const PHANTOM_PROPOSAL_WARNING =
+  "\n\n⚠️ לא נוצרה הצעת פעולה בתור הזה ושום דבר לא בוצע. נסח את הבקשה שוב כדי לקבל כרטיס אישור.";
 
 // Staff-typed dates are "YYYY-MM-DD" in Israel local time; anchor at noon UTC
 // so the calendar day never shifts across the UTC boundary.

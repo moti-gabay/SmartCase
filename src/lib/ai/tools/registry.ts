@@ -8,10 +8,16 @@
 import type { FunctionDeclaration } from "@google/genai";
 import { prisma } from "@/lib/prisma";
 import { TASK_ACTIONS } from "@/lib/ai/tools/tasks-tools";
+import { CASE_ACTIONS } from "@/lib/ai/tools/cases-tools";
+import { CLIENT_ACTIONS } from "@/lib/ai/tools/clients-tools";
 import { AUDIT, INTENT_ENTITY, deriveIntentStatus, intentExpiresAt } from "@/lib/ai/tools/intent";
-import type { ActionActor, ActionDefinition, DisplayParam, ProposedActionIntent } from "@/lib/ai/tools/types";
+import type { ActionActor, ActionDefinition, DisplayParam, HumanField, ProposedActionIntent } from "@/lib/ai/tools/types";
 
-const ACTIONS: readonly ActionDefinition<never>[] = [...TASK_ACTIONS] as ActionDefinition<never>[];
+const ACTIONS: readonly ActionDefinition<never>[] = [
+  ...TASK_ACTIONS,
+  ...CASE_ACTIONS,
+  ...CLIENT_ACTIONS,
+] as ActionDefinition<never>[];
 const BY_NAME = new Map(ACTIONS.map((a) => [a.name, a]));
 
 export function getAction(name: string): ActionDefinition<never> | undefined {
@@ -41,6 +47,7 @@ interface ProposalMeta {
   params: unknown;
   summaryHebrew: string;
   displayParams: DisplayParam[];
+  humanFields?: HumanField[];
   destructive: boolean;
   conversationId: string | null;
 }
@@ -77,6 +84,7 @@ export async function proposeAction(
     params: resolved.params,
     summaryHebrew: resolved.summaryHebrew,
     displayParams: resolved.displayParams,
+    humanFields: resolved.humanFields,
     destructive: !!def.destructive,
     conversationId,
   };
@@ -98,6 +106,7 @@ export async function proposeAction(
       action: def.verb,
       summaryHebrew: resolved.summaryHebrew,
       displayParams: resolved.displayParams,
+      humanFields: resolved.humanFields,
       destructive: !!def.destructive,
       expiresAt: intentExpiresAt(row.createdAt).toISOString(),
       status: "PENDING",
@@ -105,7 +114,9 @@ export async function proposeAction(
     modelResult: {
       status: "PENDING_APPROVAL",
       summary: resolved.summaryHebrew,
-      note: "הפעולה לא בוצעה. הוצג למשתמש כרטיס אישור — אמור לו בקצרה לאשר או לבטל בכרטיס, ואל תטען שהפעולה בוצעה.",
+      note: resolved.humanFields?.length
+        ? "הפעולה לא בוצעה. הוצג למשתמש כרטיס אישור עם שדות שעליו למלא בעצמו (פרטים מזהים) — אמור לו למלא אותם בכרטיס ולאשר. אל תבקש ממנו לכתוב אותם בצ'אט."
+        : "הפעולה לא בוצעה. הוצג למשתמש כרטיס אישור — אמור לו בקצרה לאשר או לבטל בכרטיס, ואל תטען שהפעולה בוצעה.",
     },
   };
 }
@@ -150,6 +161,7 @@ export async function loadIntentCards(intentIds: string[], userId: string): Prom
       action: meta.verb as ProposedActionIntent["action"],
       summaryHebrew: meta.summaryHebrew,
       displayParams: meta.displayParams,
+      humanFields: meta.humanFields,
       destructive: meta.destructive,
       expiresAt: intentExpiresAt(p.createdAt).toISOString(),
       status: state.status,

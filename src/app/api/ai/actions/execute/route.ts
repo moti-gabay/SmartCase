@@ -16,6 +16,8 @@ import {
   RATE_LIMIT_EXECUTIONS_PER_MINUTE,
   executeBodySchema,
   isIntentExpired,
+  pickHumanInput,
+  userFacingError,
 } from "@/lib/ai/tools/intent";
 import type { ActionActor } from "@/lib/ai/tools/types";
 import type { UserRole } from "@/types";
@@ -38,7 +40,7 @@ export async function POST(req: Request) {
 
   const parsed = executeBodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: INVALID }, { status: 400 });
-  const { intentId, decision } = parsed.data;
+  const { intentId, decision, humanInput } = parsed.data;
 
   const intent = await loadIntent(intentId);
   // Foreign intents are indistinguishable from missing ones.
@@ -57,6 +59,21 @@ export async function POST(req: Request) {
     metadata: { tool: def.name, ...metadata },
     ipAddress: ip,
   });
+
+  // Card-typed values are checked before the decision is claimed, so a typo
+  // is a fixable 400 and does not burn the intent.
+  let human: Record<string, string | undefined> = {};
+  if (decision === "APPROVE") {
+    const picked = pickHumanInput(intent.meta.humanFields ?? [], humanInput);
+    if ("error" in picked) return NextResponse.json({ error: picked.error }, { status: 400 });
+    if (def.humanSchema) {
+      const valid = def.humanSchema.safeParse(picked.values);
+      if (!valid.success) {
+        return NextResponse.json({ error: valid.error.issues[0]?.message ?? INVALID }, { status: 400 });
+      }
+      human = valid.data;
+    }
+  }
 
   if (decision === "APPROVE") {
     const recent = await prisma.auditLog.count({
@@ -96,12 +113,14 @@ export async function POST(req: Request) {
   // revalidation. The APPROVED row already blocks any replay.
   try {
     const params = def.paramsSchema.parse(intent.meta.params);
-    const result = await def.execute(params as never, actor);
+    const result = await def.execute(params as never, actor, human);
     await prisma.auditLog.create({
       data: audit(result.ok ? AUDIT.EXECUTED : AUDIT.FAILED, {
         message: result.message,
         entityHref: result.entityHref,
         params: intent.meta.params as object,
+        // Key names only — the human-typed values are PII and stay out of the log.
+        humanFields: Object.keys(human),
       }),
     });
     return NextResponse.json(
@@ -111,8 +130,11 @@ export async function POST(req: Request) {
   } catch (err) {
     console.error(`[api/ai/actions/execute] ${def.name} failed:`, err);
     await prisma.auditLog
-      .create({ data: audit(AUDIT.FAILED, { message: "שגיאת מערכת" }) })
+      .create({ data: audit(AUDIT.FAILED, { message: userFacingError(err, "שגיאת מערכת") }) })
       .catch((e) => console.error("[api/ai/actions/execute] audit failed:", e));
-    return NextResponse.json({ ok: false, status: "FAILED", message: "הביצוע נכשל" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, status: "FAILED", message: userFacingError(err, "הביצוע נכשל") },
+      { status: 500 }
+    );
   }
 }
