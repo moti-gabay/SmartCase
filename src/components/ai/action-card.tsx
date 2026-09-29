@@ -24,12 +24,21 @@ export const ActionCard = memo(function ActionCard({
   onRefine,
 }: {
   intent: ProposedActionIntent;
-  onDecide: (intentId: string, decision: "APPROVE" | "CANCEL") => Promise<boolean>;
+  onDecide: (
+    intentId: string,
+    decision: "APPROVE" | "CANCEL",
+    humanInput?: Record<string, string>
+  ) => Promise<string | null>;
   onRefine: (intent: ProposedActionIntent) => void;
 }) {
   const [busy, setBusy] = useState(false);
   // Destructive actions need a second click — one misclick must not delete.
   const [armed, setArmed] = useState(false);
+  // Card-typed PII — held only in this component and sent with the approval;
+  // never put into the chat thread or the model's context.
+  const [human, setHuman] = useState<Record<string, string>>({});
+  const [inputError, setInputError] = useState<string | null>(null);
+  const missingRequired = (intent.humanFields ?? []).some((f) => f.required && !human[f.key]?.trim());
   const badge = ACTION_DOMAIN_BADGES[intent.domain];
   const pending = intent.status === "PENDING";
 
@@ -39,7 +48,9 @@ export const ActionCard = memo(function ActionCard({
       return;
     }
     setBusy(true);
-    await onDecide(intent.intentId, decision);
+    setInputError(null);
+    const error = await onDecide(intent.intentId, decision, decision === "APPROVE" ? human : undefined);
+    setInputError(error);
     setBusy(false);
   };
 
@@ -84,6 +95,30 @@ export const ActionCard = memo(function ActionCard({
         ))}
       </dl>
 
+      {pending && intent.humanFields?.length ? (
+        <div className="mb-3 space-y-2 rounded-lg bg-slate-50 p-2">
+          <p className="text-xs text-slate-500">פרטים מזהים — מלא כאן (לא נשלחים לעוזר):</p>
+          {intent.humanFields.map((f) => (
+            <label key={f.key} className="flex items-center gap-2 text-xs">
+              <span className="w-16 shrink-0 text-slate-600">
+                {f.label}
+                {f.required && <span className="text-red-500"> *</span>}
+              </span>
+              <input
+                type={f.inputType}
+                dir="ltr"
+                autoComplete="off"
+                value={human[f.key] ?? ""}
+                onChange={(e) => setHuman((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-sm focus:border-violet-400 focus:outline-none"
+              />
+            </label>
+          ))}
+        </div>
+      ) : null}
+
+      {inputError && pending && <p className="mb-2 text-xs text-red-600">{inputError}</p>}
+
       {intent.resultMessage && !pending && (
         <p className={cn("mb-2 text-xs", intent.status === "EXECUTED" ? "text-emerald-700" : "text-red-600")}>
           {intent.resultMessage}
@@ -102,7 +137,7 @@ export const ActionCard = memo(function ActionCard({
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => decide("APPROVE")}
-            disabled={busy}
+            disabled={busy || missingRequired}
             className={cn(
               "flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50",
               intent.destructive ? "bg-red-600 hover:bg-red-700" : "bg-violet-600 hover:bg-violet-700"

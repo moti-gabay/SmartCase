@@ -24,6 +24,7 @@ const state: {
   execResult: { ok: boolean; message: string; entityHref?: string };
   audits: Json[];
   executedWith: unknown[];
+  throwError: unknown;
 } = {
   session: null,
   intent: null,
@@ -32,6 +33,7 @@ const state: {
   execResult: { ok: true, message: "done" },
   audits: [],
   executedWith: [],
+  throwError: null,
 };
 
 function reset(overrides: Partial<typeof state> = {}) {
@@ -47,6 +49,7 @@ function reset(overrides: Partial<typeof state> = {}) {
   state.execResult = { ok: true, message: "done", entityHref: "/cases/c1" };
   state.audits = [];
   state.executedWith = [];
+  state.throwError = null;
   Object.assign(state, overrides);
 }
 
@@ -85,10 +88,22 @@ mock.module(
             roles: ["ADMIN", "SUPERVISOR", "AGENT"],
             paramsSchema: z.object({ taskId: z.string() }),
             execute: async (params: unknown) => {
+              if (state.throwError) throw state.throwError;
               state.executedWith.push(params);
               return state.execResult;
             },
           }
+        : name === "human_action"
+          ? {
+              name: "human_action",
+              roles: ["ADMIN", "SUPERVISOR", "AGENT"],
+              paramsSchema: z.object({}),
+              humanSchema: z.object({ phone: z.string().regex(/^\d{9,10}$/, { message: "טלפון לא תקין" }).optional() }),
+              execute: async (params: unknown, _actor: unknown, human: unknown) => {
+                state.executedWith.push({ params, human });
+                return state.execResult;
+              },
+            }
         : name === "admin_action"
           ? { name: "admin_action", roles: ["ADMIN"], paramsSchema: z.object({}), execute: async () => state.execResult }
           : undefined,
@@ -236,4 +251,88 @@ test("execute: per-user approval rate limit", async () => {
 test("execute: malformed body is a generic 400", async () => {
   reset();
   assert.equal((await call({ decision: "APPROVE" })).status, 400);
+});
+
+// ── Card-typed human input (PII the model never sees) ────────────────────────
+
+test("pickHumanInput: rejects unexpected keys, enforces required, drops blank optionals", async () => {
+  const { pickHumanInput } = await import("../src/lib/ai/tools/intent");
+  const fields = [
+    { key: "phone", required: true },
+    { key: "email", required: false },
+  ];
+  assert.ok("error" in pickHumanInput(fields, { phone: "050", nationalId: "1" }));
+  assert.ok("error" in pickHumanInput(fields, { phone: "   " }));
+  assert.deepEqual(pickHumanInput(fields, { phone: " 0501234567 ", email: " " }), { values: { phone: "0501234567" } });
+  assert.deepEqual(pickHumanInput([], undefined), { values: {} });
+});
+
+test("userFacingError: only Hebrew messages surface", async () => {
+  const { userFacingError } = await import("../src/lib/ai/tools/intent");
+  assert.equal(userFacingError(new Error("לקוח עם תעודת זהות זו כבר קיים במערכת"), "x"), "לקוח עם תעודת זהות זו כבר קיים במערכת");
+  assert.equal(userFacingError(new Error("Case not found"), "x"), "x");
+  assert.equal(userFacingError("boom", "x"), "x");
+});
+
+const humanIntent = (required = true) => ({
+  id: "intent-1",
+  userId: "u1",
+  createdAt: new Date(),
+  meta: { tool: "human_action", params: {}, humanFields: [{ key: "phone", label: "טלפון", required, inputType: "tel" }] },
+});
+
+test("execute: missing required card field is a 400 that does not burn the intent", async () => {
+  reset({ intent: humanIntent() });
+  const res = await call({ intentId: "intent-1", decision: "APPROVE" });
+  assert.equal(res.status, 400);
+  assert.equal(state.audits.length, 0);
+  assert.equal(state.executedWith.length, 0);
+});
+
+test("execute: card field failing the action schema is a 400 with its message", async () => {
+  reset({ intent: humanIntent() });
+  const res = await call({ intentId: "intent-1", decision: "APPROVE", humanInput: { phone: "abc" } });
+  assert.equal(res.status, 400);
+  assert.equal(res.data.error, "טלפון לא תקין");
+  assert.equal(state.audits.length, 0);
+});
+
+test("execute: a key the proposal did not ask for is rejected", async () => {
+  reset({ intent: humanIntent() });
+  const res = await call({ intentId: "intent-1", decision: "APPROVE", humanInput: { phone: "0501234567", nationalId: "1" } });
+  assert.equal(res.status, 400);
+  assert.equal(state.executedWith.length, 0);
+});
+
+test("execute: valid card input reaches execute but never the audit log", async () => {
+  reset({ intent: humanIntent() });
+  const res = await call({ intentId: "intent-1", decision: "APPROVE", humanInput: { phone: "0501234567" } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(state.executedWith, [{ params: {}, human: { phone: "0501234567" } }]);
+  const logged = JSON.stringify(state.audits);
+  assert.equal(logged.includes("0501234567"), false);
+  assert.deepEqual((state.audits[1].metadata as Json).humanFields, ["phone"]);
+});
+
+test("execute: Hebrew error thrown by a shared action reaches the user and the audit", async () => {
+  reset({ throwError: new Error("לקוח עם תעודת זהות זו כבר קיים במערכת") });
+  const res = await call({ intentId: "intent-1", decision: "APPROVE" });
+  assert.equal(res.status, 500);
+  assert.equal(res.data.message, "לקוח עם תעודת זהות זו כבר קיים במערכת");
+  assert.deepEqual(actionsOf(), ["AI_ACTION_APPROVED", "AI_ACTION_FAILED"]);
+});
+
+test("execute: non-Hebrew internal error is replaced by generic copy", async () => {
+  reset({ throwError: new Error("Case not found") });
+  const res = await call({ intentId: "intent-1", decision: "APPROVE" });
+  assert.equal(res.data.message, "הביצוע נכשל");
+});
+
+test("claimsPendingAction: flags phantom 'awaiting approval' claims, not ordinary answers", async () => {
+  const { claimsPendingAction } = await import("../src/lib/ai/tools/intent");
+  assert.equal(claimsPendingAction("הצעה לשיוך תיק SC-1 ממתינה לאישורך."), true);
+  assert.equal(claimsPendingAction("אנא אשר או בטל את הפעולה בכרטיס."), true);
+  assert.equal(claimsPendingAction("הצעת הפעולה בוצעה לאחר אישור המשתמש"), true);
+  assert.equal(claimsPendingAction("יש 3 תיקים באיחור."), false);
+  assert.equal(claimsPendingAction("איזה מספר תיק לשייך לדנה?"), false);
 });

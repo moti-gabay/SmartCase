@@ -20,7 +20,7 @@ import {
   loadIntentCards,
   proposeAction,
 } from "@/lib/ai/tools/registry";
-import { INTENT_STATUS_NOTE } from "@/lib/ai/tools/intent";
+import { INTENT_STATUS_NOTE, PHANTOM_PROPOSAL_WARNING, claimsPendingAction } from "@/lib/ai/tools/intent";
 import type { ProposedActionIntent } from "@/lib/ai/tools/types";
 import type { UserRole } from "@/types";
 import { collectPiiValues, maskPii, type PiiTag } from "@/lib/ai/pii-sanitizer";
@@ -153,13 +153,35 @@ export async function POST(req: Request) {
   // Tell the model how its earlier proposals ended — otherwise it cannot know
   // whether "create the task" was approved, cancelled or left to expire.
   const historyCards = await loadIntentCards(history.flatMap((m) => intentIdsOf(m.toolCalls)), userId);
-  const contents: Content[] = history.reverse().map((m) => {
-    const notes = intentIdsOf(m.toolCalls)
+  // Proposals are replayed as the functionCall/functionResponse exchange they
+  // really were, with the final outcome in the response. Replaying them as
+  // plain text taught the model that "a proposal awaits approval" is something
+  // it can simply *say* — it then skipped the tool call on later requests.
+  // Args are not persisted (PII policy), so the replayed call carries none.
+  const contents: Content[] = history.reverse().flatMap((m): Content[] => {
+    const text: Content = { role: m.role === "USER" ? "user" : "model", parts: [{ text: m.content }] };
+    const cards = intentIdsOf(m.toolCalls)
       .map((id) => historyCards.get(id))
-      .filter((c): c is ProposedActionIntent => !!c)
-      .map((c) => `[הצעת פעולה: ${c.summaryHebrew} — ${INTENT_STATUS_NOTE[c.status]}]`);
-    const text = notes.length ? `${m.content}\n${notes.join("\n")}` : m.content;
-    return { role: m.role === "USER" ? "user" : "model", parts: [{ text }] };
+      .filter((c): c is ProposedActionIntent => !!c);
+    if (m.role === "USER" || cards.length === 0) return [text];
+    return [
+      { role: "model", parts: cards.map((c) => ({ functionCall: { name: c.tool, args: {} } })) },
+      {
+        role: "user",
+        parts: cards.map((c) => ({
+          functionResponse: {
+            name: c.tool,
+            response: {
+              status: "PENDING_APPROVAL",
+              summary: c.summaryHebrew,
+              finalOutcome: INTENT_STATUS_NOTE[c.status],
+              ...(c.resultMessage && { result: c.resultMessage }),
+            },
+          },
+        })),
+      },
+      text,
+    ];
   });
 
   let aborted = false;
@@ -282,6 +304,10 @@ export async function POST(req: Request) {
           }
         }
 
+        if (!toolRecords.some((t) => t.intentId) && claimsPendingAction(fullText)) {
+          fullText += PHANTOM_PROPOSAL_WARNING;
+          send("delta", { text: PHANTOM_PROPOSAL_WARNING });
+        }
         // A proposal with no accompanying text still needs a persisted row —
         // the card is linked to history through its toolCalls.
         if (!fullText.trim() && toolRecords.some((t) => t.intentId)) {

@@ -143,15 +143,22 @@ export function useChatStream() {
 
   // Human-in-the-Loop decision on a proposal card. Only the intent id travels —
   // the server executes the params it persisted at proposal time.
+  // Returns an error string for a fixable 400 (bad card input) — the card
+  // stays PENDING and shows it inline; every other outcome is final.
   const decide = useCallback(
-    async (intentId: string, decision: "APPROVE" | "CANCEL"): Promise<boolean> => {
+    async (
+      intentId: string,
+      decision: "APPROVE" | "CANCEL",
+      humanInput?: Record<string, string>
+    ): Promise<string | null> => {
       try {
         const res = await fetch("/api/ai/actions/execute", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ intentId, decision }),
+          body: JSON.stringify({ intentId, decision, humanInput }),
         });
         const data = await res.json().catch(() => ({}));
+        if (res.status === 400 || res.status === 429) return data.error ?? "הנתונים שהוזנו אינם תקינים";
         const status: IntentStatus =
           data.status ?? (res.status === 410 ? "EXPIRED" : res.status === 403 ? "DENIED" : "FAILED");
         patchProposal(intentId, {
@@ -159,10 +166,9 @@ export function useChatStream() {
           resultMessage: data.message ?? data.error,
           entityHref: data.entityHref,
         });
-        return res.ok;
+        return null;
       } catch {
-        patchProposal(intentId, { status: "FAILED", resultMessage: "שגיאת רשת — נסה שוב" });
-        return false;
+        return "שגיאת רשת — נסה שוב";
       }
     },
     [patchProposal]
