@@ -103,6 +103,25 @@ export const PRIORITY_BG: Record<string, string> = {
   URGENT: "bg-red-50",
 };
 
+export const TASK_STATUS_LABELS: Record<string, string> = {
+  PENDING:     "ממתין",
+  IN_PROGRESS: "בתהליך",
+  COMPLETED:   "הושלם",
+  CANCELLED:   "בוטל",
+};
+
+// AI assistant action-confirmation card: module badge per ActionDomain.
+export const ACTION_DOMAIN_BADGES: Record<string, { icon: string; label: string }> = {
+  DASHBOARD:    { icon: "📊", label: "לוח בקרה" },
+  CASES:        { icon: "📁", label: "תיק" },
+  CLIENTS:      { icon: "👤", label: "לקוח" },
+  TASKS:        { icon: "✅", label: "משימה" },
+  DOCUMENTS:    { icon: "📄", label: "מסמך" },
+  AI:           { icon: "🤖", label: "כלי AI" },
+  APPOINTMENTS: { icon: "📅", label: "פגישה" },
+  USERS:        { icon: "🛡️", label: "משתמש" },
+};
+
 export const DOCUMENT_STATUS_LABELS: Record<string, string> = {
   MISSING:                "חסר",
   PENDING_UPLOAD:         "בהעלאה",

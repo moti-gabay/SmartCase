@@ -27,7 +27,7 @@ export function sliceMaskSafe(text: string, maxLen: number): string {
   return text.slice(0, maxLen).replace(/\[[^\]]*$/, "");
 }
 
-export type ChatSseEvent = "meta" | "delta" | "tool" | "done" | "error";
+export type ChatSseEvent = "meta" | "delta" | "tool" | "proposal" | "done" | "error";
 
 // `event: <type>\ndata: <one-line JSON>\n\n` — JSON.stringify never emits raw
 // newlines, so one data line is always enough.
