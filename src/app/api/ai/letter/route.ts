@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/../auth";
+import { requireStaffSession } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { generateLetter } from "@/lib/services/letters";
 
 // List saved letters for a case.
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
+  const guard = await requireStaffSession();
+  if ("denied" in guard) return guard.denied;
 
   const caseId = new URL(req.url).searchParams.get("caseId");
   if (!caseId) return NextResponse.json({ letters: [] });
@@ -32,8 +32,8 @@ export async function GET(req: Request) {
 
 // Generate a letter with Claude and save it.
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
+  const guard = await requireStaffSession();
+  if ("denied" in guard) return guard.denied;
 
   try {
     const { caseId, letterType, context } = await req.json();
@@ -43,7 +43,7 @@ export async function POST(req: Request) {
       caseId,
       letterType,
       context: typeof context === "string" ? context : undefined,
-      actor: { id: session.user.id, name: session.user.name },
+      actor: { id: guard.session.user.id, name: guard.session.user.name },
     });
     if (!letter) return NextResponse.json({ error: "התיק לא נמצא" }, { status: 404 });
 

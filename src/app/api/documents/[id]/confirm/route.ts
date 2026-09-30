@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
-import { auth } from "@/../auth";
+import { requireStaffSession } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { headObject, deleteObject, MAX_UPLOAD_SIZE, ALLOWED_MIME } from "@/core/storage/s3-storage";
 import { logCaseActivity } from "@/lib/activity";
@@ -10,8 +10,9 @@ import { logCaseActivity } from "@/lib/activity";
 // server-side here (HeadObject), delete + reject anything invalid, then promote the
 // row to UPLOADED_PENDING_REVIEW, link the checklist item, and recompute the flag.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
+  const guard = await requireStaffSession();
+  if ("denied" in guard) return guard.denied;
+  const { session } = guard;
 
   try {
     const { id } = await params;

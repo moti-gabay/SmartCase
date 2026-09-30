@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/../auth";
+import { requireStaffSession } from "@/lib/authz";
 import { refineLetter } from "@/lib/services/letters";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
+  const guard = await requireStaffSession();
+  if ("denied" in guard) return guard.denied;
 
   try {
     const { id } = await params;

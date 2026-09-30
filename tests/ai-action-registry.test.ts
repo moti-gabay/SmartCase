@@ -23,7 +23,9 @@ const ALL = ["create_task", "update_task", "delete_task",
   "create_case", "update_case", "change_case_status", "delete_case", "add_case_tag", "remove_case_tag", "generate_portal_link",
   "create_client", "update_client", "delete_client",
   "create_slot", "book_slot", "reschedule_meeting", "cancel_meeting", "delete_slot",
-  "generate_letter", "refine_letter", "analyze_document", "review_document", "delete_document"];
+  "generate_letter", "refine_letter", "analyze_document", "review_document", "delete_document",
+  "commit_ai_summary",
+  "approve_user", "suspend_user", "change_role", "delete_user"];
 
 test("registry: every action is registered, and name == declaration name", async () => {
   const { getAction } = await registry();
@@ -90,4 +92,37 @@ test("registry: appointment args take Israel wall-clock HH:MM, not free text", a
   assert.equal(schema.safeParse({ caseNumber: "SC-1", date: "2026-10-06", time: "10:00" }).success, true);
   assert.equal(schema.safeParse({ caseNumber: "SC-1", date: "2026-10-06", time: "10am" }).success, false);
   assert.equal(schema.safeParse({ caseNumber: "SC-1", date: "6/10", time: "10:00" }).success, false);
+});
+
+test("registry: user management is ADMIN-only and invisible to other roles", async () => {
+  const { getAction, getActionDeclarations, describeActions } = await registry();
+  const USER_TOOLS = ["approve_user", "suspend_user", "change_role", "delete_user"];
+  for (const name of USER_TOOLS) assert.deepEqual([...getAction(name)!.roles], ["ADMIN"], name);
+  for (const role of ["SUPERVISOR", "AGENT"]) {
+    const names = getActionDeclarations(role).map((d) => d.name);
+    for (const name of USER_TOOLS) assert.ok(!names.includes(name), `${role} sees ${name}`);
+    assert.ok(!describeActions(role).includes("approve_user"));
+  }
+  assert.equal(getAction("delete_user")!.destructive, true);
+});
+
+test("registry: change_role cannot grant CLIENT or unknown roles", async () => {
+  const { getAction } = await registry();
+  const schema = getAction("change_role")!.argsSchema;
+  assert.equal(schema.safeParse({ userName: "x", role: "SUPERVISOR" }).success, true);
+  assert.equal(schema.safeParse({ userName: "x", role: "CLIENT" }).success, false);
+  assert.equal(schema.safeParse({ userName: "x", role: "SUPERADMIN" }).success, false);
+});
+
+test("registry: toClientCard strips the server-only model args", async () => {
+  const { toClientCard } = await import("../src/lib/ai/tools/registry");
+  const card = {
+    intentId: "i1", tool: "create_task", domain: "TASKS" as const, action: "CREATE" as const,
+    summaryHebrew: "s", displayParams: [], destructive: false, expiresAt: "", status: "PENDING" as const,
+    args: { caseNumber: "SC-1", title: "t" },
+  };
+  const out = toClientCard(card);
+  assert.equal("args" in out, false);
+  assert.equal(out.intentId, "i1");
+  assert.ok("args" in card, "input card is not mutated");
 });
