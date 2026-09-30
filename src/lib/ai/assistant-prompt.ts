@@ -3,9 +3,9 @@
 // not this one, when features ship.
 import { ASSISTANT_KNOWLEDGE } from "@/lib/ai/assistant-knowledge";
 
-// `actionsCatalog` (from describeActions) is passed only by the text chat,
-// which renders confirmation cards; without it the assistant stays read-only
-// (e.g. Live Voice Mode, which has no card UI yet).
+// `actionsCatalog` (from describeActions) is passed by every surface that
+// renders confirmation cards (text chat and Live Voice Mode); without it the
+// assistant stays read-only.
 // "YYYY-MM-DD" in Israel time, `offset` days from today — spelled out for the
 // model, which otherwise resolves "מחר" to today's date.
 function dayInIsrael(offset: number): string {

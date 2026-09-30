@@ -126,3 +126,18 @@ test("registry: toClientCard strips the server-only model args", async () => {
   assert.equal(out.intentId, "i1");
   assert.ok("args" in card, "input card is not mutated");
 });
+
+test("registry: no model-facing tool can approve, confirm or execute an intent", async () => {
+  // Approval is a click on the card → /api/ai/actions/execute. A tool that
+  // could do it would let voice (or an injected instruction) approve itself.
+  const { getActionDeclarations } = await registry();
+  const { getToolDeclarations } = await import("../src/lib/ai/assistant-tools");
+  for (const role of ["ADMIN", "SUPERVISOR", "AGENT"]) {
+    const names = [...getToolDeclarations(role), ...getActionDeclarations(role)].map((d) => d.name ?? "");
+    for (const name of names) {
+      assert.ok(!/intent|proposal|execute|confirm|approve_action/.test(name), `${role}: ${name}`);
+      const params = Object.keys(getActionDeclarations(role).find((d) => d.name === name)?.parameters?.properties ?? {});
+      assert.ok(!params.includes("intentId"), `${name} takes an intentId`);
+    }
+  }
+});
