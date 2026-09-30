@@ -25,6 +25,7 @@ const state: {
   audits: Json[];
   executedWith: unknown[];
   throwError: unknown;
+  jev: Json | null;
 } = {
   session: null,
   intent: null,
@@ -34,6 +35,7 @@ const state: {
   audits: [],
   executedWith: [],
   throwError: null,
+  jev: null,
 };
 
 function reset(overrides: Partial<typeof state> = {}) {
@@ -50,6 +52,7 @@ function reset(overrides: Partial<typeof state> = {}) {
   state.audits = [];
   state.executedWith = [];
   state.throwError = null;
+  state.jev = null;
   Object.assign(state, overrides);
 }
 
@@ -70,7 +73,7 @@ mock.module(
     prisma: {
       auditLog,
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
-        fn({ auditLog, $queryRaw: async () => [{ "?column?": 1 }] }),
+        fn({ auditLog, task: {}, $queryRaw: async () => [{ "?column?": 1 }] }),
     },
   })
 );
@@ -101,6 +104,22 @@ mock.module(
               humanSchema: z.object({ phone: z.string().regex(/^\d{9,10}$/, { message: "טלפון לא תקין" }).optional() }),
               execute: async (params: unknown, _actor: unknown, human: unknown) => {
                 state.executedWith.push({ params, human });
+                return state.execResult;
+              },
+            }
+        : name === "jev_action"
+          ? {
+              name: "jev_action",
+              roles: ["ADMIN", "SUPERVISOR", "AGENT"],
+              paramsSchema: z.object({}),
+              jevRules: [
+                {
+                  id: "fake.rule",
+                  evaluate: async () => state.jev,
+                },
+              ],
+              execute: async (params: unknown) => {
+                state.executedWith.push(params);
                 return state.execResult;
               },
             }
@@ -343,4 +362,60 @@ test("israelDateTimeToUtc: honours IDT (UTC+3) and IST (UTC+2)", async () => {
   assert.equal(israelDateTimeToUtc("2026-12-15", "10:00").toISOString(), "2026-12-15T08:00:00.000Z");
   // Day after the October 2026 fall-back (Oct 25) is already IST.
   assert.equal(israelDateTimeToUtc("2026-10-26", "09:30").toISOString(), "2026-10-26T07:30:00.000Z");
+});
+
+// ── JEV ───────────────────────────────────────────────────────────────────────
+
+const WARN = { ruleId: "fake.rule", status: "WARNING_REQUIRES_ELEVATED_APPROVAL", reasonHebrew: "אזהרה" };
+
+test("jev: execute-time BLOCKED is terminal, audited, and never executes", async () => {
+  reset({ jev: { ruleId: "fake.rule", status: "BLOCKED", reasonHebrew: "חסום ע״י מדיניות" } });
+  state.intent!.meta = { tool: "jev_action", params: {} };
+  const res = await call({ intentId: "intent-1", decision: "APPROVE" });
+  assert.equal(res.status, 422);
+  assert.equal(res.data.status, "BLOCKED");
+  assert.equal(res.data.error, "חסום ע״י מדיניות");
+  assert.deepEqual(actionsOf(), ["JEV_BLOCKED"]);
+  assert.equal(state.executedWith.length, 0);
+});
+
+test("jev: an unacknowledged warning is a 409 with no decision row (intent stays approvable)", async () => {
+  reset({ jev: WARN });
+  state.intent!.meta = { tool: "jev_action", params: {} };
+  const res = await call({ intentId: "intent-1", decision: "APPROVE" });
+  assert.equal(res.status, 409);
+  assert.deepEqual(res.data.warnings, [{ ruleId: "fake.rule", reasonHebrew: "אזהרה" }]);
+  assert.equal(state.audits.length, 0);
+  assert.equal(state.executedWith.length, 0);
+});
+
+test("jev: an acknowledged warning logs JEV_EVALUATED before APPROVED and executes", async () => {
+  reset({ jev: WARN });
+  state.intent!.meta = { tool: "jev_action", params: {} };
+  const res = await call({ intentId: "intent-1", decision: "APPROVE", acknowledgedWarnings: ["fake.rule"] });
+  assert.equal(res.status, 200);
+  assert.deepEqual(actionsOf(), ["JEV_EVALUATED", "AI_ACTION_APPROVED", "AI_ACTION_EXECUTED"]);
+  assert.deepEqual((state.audits[0].metadata as Json).acknowledged, ["fake.rule"]);
+});
+
+test("jev: a clean pass still records the evaluation; cancel skips JEV entirely", async () => {
+  reset();
+  state.intent!.meta = { tool: "jev_action", params: {} };
+  assert.equal((await call({ intentId: "intent-1", decision: "APPROVE" })).status, 200);
+  assert.equal(actionsOf()[0], "JEV_EVALUATED");
+  reset({ jev: { ruleId: "fake.rule", status: "BLOCKED", reasonHebrew: "x" } });
+  state.intent!.meta = { tool: "jev_action", params: {} };
+  assert.equal((await call({ intentId: "intent-1", decision: "CANCEL" })).status, 200);
+  assert.deepEqual(actionsOf(), ["AI_ACTION_CANCELLED"]);
+});
+
+test("jev: lifecycle — JEV_BLOCKED is a decision and derives BLOCKED; body bounds acknowledgedWarnings", async () => {
+  const { DECIDED_ACTIONS, deriveIntentStatus, executeBodySchema } = await import("../src/lib/ai/tools/intent");
+  assert.ok(DECIDED_ACTIONS.includes("JEV_BLOCKED"));
+  const s = deriveIntentStatus([{ action: "JEV_BLOCKED", metadata: { message: "חסום" } }], new Date(), new Date());
+  assert.deepEqual([s.status, s.message], ["BLOCKED", "חסום"]);
+  const base = { intentId: "i", decision: "APPROVE" as const };
+  assert.ok(executeBodySchema.safeParse({ ...base, acknowledgedWarnings: ["a"] }).success);
+  assert.ok(!executeBodySchema.safeParse({ ...base, acknowledgedWarnings: Array(21).fill("a") }).success);
+  assert.ok(!executeBodySchema.safeParse({ ...base, acknowledgedWarnings: ["x".repeat(65)] }).success);
 });

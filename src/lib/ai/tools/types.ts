@@ -8,6 +8,7 @@
 import type { FunctionDeclaration } from "@google/genai";
 import type { z } from "zod";
 import type { UserRole } from "@/types";
+import type { JevRule, JevWarning } from "@/lib/jev/types";
 
 export type ActionDomain =
   | "DASHBOARD"
@@ -68,6 +69,9 @@ export interface ActionDefinition<P = unknown> {
   // Validates human-typed values; every key optional here — which keys are
   // required is decided per proposal by the humanFields resolve returned.
   humanSchema?: z.ZodType<Record<string, string | undefined>>;
+  // Deterministic policy rules (src/lib/jev/) — run on the resolved params at
+  // proposal time and again under the claim lock at execution.
+  jevRules?: readonly JevRule<P>[];
   execute(params: P, actor: ActionActor, human: Record<string, string | undefined>): Promise<ExecResult>;
 }
 
@@ -81,10 +85,12 @@ export interface ProposedActionIntent {
   displayParams: DisplayParam[];
   humanFields?: HumanField[];
   destructive: boolean;
+  // JEV warnings the approver must acknowledge on the card.
+  warnings?: JevWarning[];
   expiresAt: string;
   status: IntentStatus;
   resultMessage?: string;
   entityHref?: string;
 }
 
-export type IntentStatus = "PENDING" | "EXECUTED" | "FAILED" | "CANCELLED" | "DENIED" | "EXPIRED";
+export type IntentStatus = "PENDING" | "EXECUTED" | "FAILED" | "CANCELLED" | "DENIED" | "EXPIRED" | "BLOCKED";

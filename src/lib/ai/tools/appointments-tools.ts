@@ -12,6 +12,7 @@ import { createMeetingSlots, deleteMeetingSlot } from "@/lib/workflows/meeting-s
 import { bookSlotForCase, buildMeetingSlotPorts, releaseCaseBooking } from "@/lib/services/meeting-slots";
 import { formatDateTime, israelDateTimeToUtc } from "@/lib/ai/tools/intent";
 import { resolveCase, resolveSlot } from "@/lib/ai/tools/resolve";
+import { notInPast } from "@/lib/jev/rules/dates";
 import type { ActionDefinition, DisplayParam } from "@/lib/ai/tools/types";
 
 const STAFF = ["ADMIN", "SUPERVISOR", "AGENT"] as const;
@@ -97,6 +98,7 @@ const createSlotAction: ActionDefinition<z.infer<typeof createParams>> = {
   },
   argsSchema: createArgs,
   paramsSchema: createParams,
+  jevRules: [notInPast("slot.start_not_past", "מועד הפגישה", (p) => p.startsAt)],
   async resolve(raw) {
     const args = createArgs.parse(raw);
     const startsAt = israelDateTimeToUtc(args.date, args.time);
