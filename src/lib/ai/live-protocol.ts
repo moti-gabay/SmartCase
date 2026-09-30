@@ -127,6 +127,18 @@ export function normalizeTurns(turns: readonly LiveTurn[], fallback: string): Li
   return out;
 }
 
+export const UNTRANSCRIBED_REQUEST = "(בקשה קולית ללא תמלול)";
+
+// normalizeTurns drops a leading assistant turn (an unprompted greeting). But a
+// batch that carries a proposal must survive: its tool records — and with them
+// the card's link into history — attach to the batch's assistant row. When the
+// user's speech produced no transcript, a neutral placeholder user turn keeps
+// the batch (and the USER → ASSISTANT alternation) intact.
+export function withProposalLead(turns: readonly LiveTurn[], hasProposal: boolean): LiveTurn[] {
+  if (!hasProposal || turns.some((t) => t.role === "USER" && t.text.trim())) return [...turns];
+  return [{ role: "USER", text: UNTRANSCRIBED_REQUEST }, ...turns];
+}
+
 // Validate an untrusted commit body's turns. Returns null on any shape error.
 export function parseTurns(raw: unknown): LiveTurn[] | null {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > LIVE_MAX_TURNS_PER_COMMIT) return null;
@@ -147,7 +159,13 @@ export const LIVE_PROMPT_ADDENDUM = `
 
 ## מצב שיחה קולית (גובר על כללי הפורמט)
 - אתה מדבר בקול. ענה במשפטים קצרים וטבעיים, ללא Markdown, טבלאות או רשימות.
-- כשיש נתונים רבים — סכם את העיקר והצע לפרט.`;
+- כשיש נתונים רבים — סכם את העיקר והצע לפרט.
+
+## פעולות בשיחה קולית
+- כשמבקשים ליצור, לעדכן, למחוק או להפיק משהו — קרא לכלי הפעולה המתאים. הקריאה רק מציגה כרטיס אישור בחלון העוזר; שום דבר לא מתבצע.
+- אחרי הצעה, אמור במשפט אחד מה הוצע ובקש: "בדוק את הכרטיס בחלון ולחץ על 'אישור וביצוע'".
+- אישור בקול אינו אישור. אם המשתמש אומר "כן", "אשר" או "בצע" — הסבר שהאישור נעשה רק בלחיצה על הכפתור בכרטיס. לעולם אל תאמר שפעולה בוצעה.
+- ת"ז, טלפון ואימייל לא נאמרים בקול: הם מוזנים ישירות בכרטיס.`;
 
 export function buildHistoryBlock(history: readonly LiveTurn[]): string {
   if (history.length === 0) return "";

@@ -11,6 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { getGeminiClient } from "@/lib/ai/gemini";
 import { buildSystemPrompt } from "@/lib/ai/assistant-prompt";
 import { getToolDeclarations } from "@/lib/ai/assistant-tools";
+import { describeActions, getActionDeclarations } from "@/lib/ai/tools/registry";
 import { HISTORY_MESSAGES } from "@/lib/ai/chat-protocol";
 import { createRateLimiter } from "@/lib/ai/voice-input";
 import {
@@ -63,7 +64,7 @@ export async function POST(req: Request) {
     take: HISTORY_MESSAGES,
   });
   const systemInstruction =
-    buildSystemPrompt(session.user.name ?? "משתמש") +
+    buildSystemPrompt(session.user.name ?? "משתמש", describeActions(role)) +
     LIVE_PROMPT_ADDENDUM +
     buildHistoryBlock(history.reverse().map((m) => ({ role: m.role, text: m.content })));
 
@@ -79,7 +80,9 @@ export async function POST(req: Request) {
           config: {
             responseModalities: [Modality.AUDIO],
             systemInstruction,
-            tools: [{ functionDeclarations: getToolDeclarations(role) }],
+            // Action tools only propose (see /api/ai/live/tool) — locked into
+            // the token with the read tools, filtered by the session's role.
+            tools: [{ functionDeclarations: [...getToolDeclarations(role), ...getActionDeclarations(role)] }],
             inputAudioTranscription: {},
             outputAudioTranscription: {},
           },
