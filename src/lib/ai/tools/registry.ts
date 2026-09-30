@@ -14,7 +14,9 @@ import { APPOINTMENT_ACTIONS } from "@/lib/ai/tools/appointments-tools";
 import { DOCUMENT_ACTIONS } from "@/lib/ai/tools/docs-tools";
 import { AI_ACTIONS } from "@/lib/ai/tools/ai-tools";
 import { USER_ACTIONS } from "@/lib/ai/tools/users-tools";
-import { AUDIT, INTENT_ENTITY, deriveIntentStatus, intentExpiresAt } from "@/lib/ai/tools/intent";
+import { AUDIT, INTENT_ENTITY, JEV_ENTITY, deriveIntentStatus, intentExpiresAt } from "@/lib/ai/tools/intent";
+import { blockedReason, evaluateJev, toWarnings } from "@/lib/jev/engine";
+import type { JevResult } from "@/lib/jev/types";
 import type { ActionActor, ActionDefinition, DisplayParam, HumanField, ProposedActionIntent } from "@/lib/ai/tools/types";
 
 const ACTIONS: readonly ActionDefinition<never>[] = [
@@ -62,6 +64,8 @@ interface ProposalMeta {
   humanFields?: HumanField[];
   destructive: boolean;
   conversationId: string | null;
+  // Proposal-time JEV evaluation — this PROPOSED row is its audit record.
+  jev?: JevResult;
 }
 
 // Validates + resolves model args and persists the proposal. Returns the card
@@ -89,6 +93,28 @@ export async function proposeAction(
   const resolved = await def.resolve(parsed.data, actor);
   if ("error" in resolved) return { modelResult: { ...resolved } };
 
+  const jev = await evaluateJev(def.jevRules as never, resolved.params as never, { actor, db: prisma, now: new Date() });
+  if (jev.status === "BLOCKED") {
+    const reason = blockedReason(jev);
+    await prisma.auditLog.create({
+      data: {
+        userId: actor.id,
+        action: AUDIT.JEV_BLOCKED,
+        entityType: JEV_ENTITY,
+        entityId: def.name,
+        metadata: JSON.parse(JSON.stringify({ tool: def.name, phase: "PROPOSE", args: parsed.data, verdicts: jev.verdicts, evaluated: jev.evaluated })),
+      },
+    });
+    return {
+      modelResult: {
+        error: reason,
+        blocked: true,
+        note: "הפעולה נחסמה ע״י מדיניות המערכת ולא הוצג כרטיס. הסבר למשתמש את הסיבה ואל תנסה שוב באותם פרמטרים.",
+      },
+    };
+  }
+  const warnings = toWarnings(jev);
+
   const meta: ProposalMeta = {
     tool: def.name,
     args: parsed.data as Record<string, unknown>,
@@ -100,6 +126,7 @@ export async function proposeAction(
     humanFields: resolved.humanFields,
     destructive: !!def.destructive,
     conversationId,
+    jev: jev.evaluated.length ? jev : undefined,
   };
   const row = await prisma.auditLog.create({
     data: {
@@ -121,6 +148,7 @@ export async function proposeAction(
       displayParams: resolved.displayParams,
       humanFields: resolved.humanFields,
       destructive: !!def.destructive,
+      warnings: warnings.length ? warnings : undefined,
       expiresAt: intentExpiresAt(row.createdAt).toISOString(),
       status: "PENDING",
     },
@@ -130,6 +158,7 @@ export async function proposeAction(
       note: resolved.humanFields?.length
         ? "הפעולה לא בוצעה. הוצג למשתמש כרטיס אישור עם שדות שעליו למלא בעצמו (פרטים מזהים) — אמור לו למלא אותם בכרטיס ולאשר. אל תבקש ממנו לכתוב אותם בצ'אט."
         : "הפעולה לא בוצעה. הוצג למשתמש כרטיס אישור — אמור לו בקצרה לאשר או לבטל בכרטיס, ואל תטען שהפעולה בוצעה.",
+      ...(warnings.length && { warnings: warnings.map((w) => w.reasonHebrew), warningNote: "בכרטיס מוצגות אזהרות מדיניות שהמשתמש חייב לאשר במפורש — הזכר זאת בקצרה." }),
     },
   };
 }
@@ -186,6 +215,7 @@ export async function loadIntentCards(intentIds: string[], userId: string): Prom
       displayParams: meta.displayParams,
       humanFields: meta.humanFields,
       destructive: meta.destructive,
+      warnings: meta.jev ? toWarnings(meta.jev) : undefined,
       expiresAt: intentExpiresAt(p.createdAt).toISOString(),
       status: state.status,
       resultMessage: state.message,

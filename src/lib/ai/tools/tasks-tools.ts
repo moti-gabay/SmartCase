@@ -12,6 +12,8 @@ import { deleteTask, updateTask } from "@/lib/workflows/task-management";
 import { buildTaskPorts } from "@/lib/workflows/task-ports";
 import { formatDay, parseDay } from "@/lib/ai/tools/intent";
 import { resolveCase, resolveStaff, resolveTask } from "@/lib/ai/tools/resolve";
+import { deadlineSoon, notInPast } from "@/lib/jev/rules/dates";
+import { assigneeApproved, assigneeLoad } from "@/lib/jev/rules/assignee";
 import type { ActionDefinition, DisplayParam } from "@/lib/ai/tools/types";
 
 const STAFF = ["ADMIN", "SUPERVISOR", "AGENT"] as const;
@@ -67,6 +69,12 @@ const createTaskAction: ActionDefinition<z.infer<typeof createParams>> = {
   },
   argsSchema: createArgs,
   paramsSchema: createParams,
+  jevRules: [
+    notInPast("task.due_not_past", "מועד היעד", (p) => p.dueDate),
+    deadlineSoon("task.due_soon", "מועד היעד", (p) => p.dueDate),
+    assigneeApproved((p) => p.assignedToId),
+    assigneeLoad((p) => p.assignedToId),
+  ],
   async resolve(raw) {
     const args = createArgs.parse(raw);
     const kase = await resolveCase(args.caseNumber);
@@ -147,6 +155,12 @@ const updateTaskAction: ActionDefinition<z.infer<typeof updateParams>> = {
   },
   argsSchema: updateArgs,
   paramsSchema: updateParams,
+  jevRules: [
+    notInPast("task.due_not_past", "מועד היעד", (p) => p.dueDate),
+    deadlineSoon("task.due_soon", "מועד היעד", (p) => p.dueDate),
+    assigneeApproved((p) => p.assignedToId),
+    assigneeLoad((p) => p.assignedToId),
+  ],
   async resolve(raw) {
     const args = updateArgs.parse(raw);
     const kase = await resolveCase(args.caseNumber);

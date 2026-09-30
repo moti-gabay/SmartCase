@@ -141,3 +141,34 @@ test("registry: no model-facing tool can approve, confirm or execute an intent",
     }
   }
 });
+
+test("registry: JEV rule ids are unique per action and reasons are Hebrew", async () => {
+  const { getAction } = await registry();
+  const { evaluateJev } = await import("../src/lib/jev/engine");
+  for (const name of ALL) {
+    const ids = (getAction(name)!.jevRules ?? []).map((r) => r.id);
+    assert.equal(new Set(ids).size, ids.length, `${name} has duplicate JEV rule ids`);
+  }
+  // A blocking rule's reason must be user-facing Hebrew (it reaches the card/model).
+  const db = { case: { findUnique: async () => ({ status: "SUBMITTED" }) } } as never;
+  const r = await evaluateJev(getAction("delete_case")!.jevRules as never, { caseId: "c" }, { actor: { id: "u", role: "ADMIN" }, db, now: new Date() });
+  assert.equal(r.status, "BLOCKED");
+  assert.match(r.verdicts[0].reasonHebrew, /[\u0590-\u05FF]/);
+});
+
+test("registry: actions carrying a date or assignee param declare the matching JEV rule", async () => {
+  // Structural guard: a new action with these fields cannot silently skip policy.
+  const { getAction } = await registry();
+  const need: Record<string, string[]> = {
+    create_task: ["task.due_not_past", "assignee.approved"],
+    update_task: ["task.due_not_past", "assignee.approved"],
+    create_case: ["case.deadline_not_past", "assignee.approved"],
+    update_case: ["case.deadline_not_past", "assignee.approved"],
+    create_slot: ["slot.start_not_past"],
+    delete_case: ["case.not_in_flight", "case.has_dependents"],
+  };
+  for (const [name, rules] of Object.entries(need)) {
+    const ids = (getAction(name)!.jevRules ?? []).map((r) => r.id);
+    for (const id of rules) assert.ok(ids.includes(id), `${name} missing ${id}`);
+  }
+});

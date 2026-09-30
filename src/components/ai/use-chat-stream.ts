@@ -149,15 +149,22 @@ export function useChatStream() {
     async (
       intentId: string,
       decision: "APPROVE" | "CANCEL",
-      humanInput?: Record<string, string>
+      humanInput?: Record<string, string>,
+      acknowledgedWarnings?: string[]
     ): Promise<string | null> => {
       try {
         const res = await fetch("/api/ai/actions/execute", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ intentId, decision, humanInput }),
+          body: JSON.stringify({ intentId, decision, humanInput, acknowledgedWarnings }),
         });
         const data = await res.json().catch(() => ({}));
+        // JEV: a warning the card had not shown — swap the set in (the card
+        // resets its checkbox) and keep the intent PENDING.
+        if (res.status === 409 && Array.isArray(data.warnings)) {
+          patchProposal(intentId, { warnings: data.warnings });
+          return data.error ?? "יש לאשר את אזהרות המדיניות";
+        }
         if (res.status === 400 || res.status === 429) return data.error ?? "הנתונים שהוזנו אינם תקינים";
         const status: IntentStatus =
           data.status ?? (res.status === 410 ? "EXPIRED" : res.status === 403 ? "DENIED" : "FAILED");

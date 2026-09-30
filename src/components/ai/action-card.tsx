@@ -5,7 +5,7 @@
 // intent id back, never the params.
 import { memo, useState } from "react";
 import Link from "next/link";
-import { Check, Loader2, PencilLine, X } from "lucide-react";
+import { Check, Loader2, PencilLine, TriangleAlert, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ACTION_DOMAIN_BADGES } from "@/lib/constants";
 import type { IntentStatus, ProposedActionIntent } from "@/lib/ai/tools/types";
@@ -15,6 +15,7 @@ const STATUS_TEXT: Partial<Record<IntentStatus, string>> = {
   FAILED: "הביצוע נכשל",
   CANCELLED: "בוטל",
   DENIED: "אין הרשאה",
+  BLOCKED: "נחסם ע״י מדיניות",
   EXPIRED: "פג תוקף",
 };
 
@@ -27,7 +28,8 @@ export const ActionCard = memo(function ActionCard({
   onDecide: (
     intentId: string,
     decision: "APPROVE" | "CANCEL",
-    humanInput?: Record<string, string>
+    humanInput?: Record<string, string>,
+    acknowledgedWarnings?: string[]
   ) => Promise<string | null>;
   onRefine: (intent: ProposedActionIntent) => void;
 }) {
@@ -39,6 +41,12 @@ export const ActionCard = memo(function ActionCard({
   const [human, setHuman] = useState<Record<string, string>>({});
   const [inputError, setInputError] = useState<string | null>(null);
   const missingRequired = (intent.humanFields ?? []).some((f) => f.required && !human[f.key]?.trim());
+  // Acknowledgment is bound to the exact warning set shown: if the server
+  // returns a different set (409), the checkbox resets itself.
+  const warnings = intent.warnings ?? [];
+  const warningKey = warnings.map((w) => w.ruleId).join("|");
+  const [ackedKey, setAckedKey] = useState<string | null>(null);
+  const needsAck = warnings.length > 0 && ackedKey !== warningKey;
   const badge = ACTION_DOMAIN_BADGES[intent.domain];
   const pending = intent.status === "PENDING";
 
@@ -49,7 +57,12 @@ export const ActionCard = memo(function ActionCard({
     }
     setBusy(true);
     setInputError(null);
-    const error = await onDecide(intent.intentId, decision, decision === "APPROVE" ? human : undefined);
+    const error = await onDecide(
+      intent.intentId,
+      decision,
+      decision === "APPROVE" ? human : undefined,
+      decision === "APPROVE" ? warnings.map((w) => w.ruleId) : undefined
+    );
     setInputError(error);
     setBusy(false);
   };
@@ -95,6 +108,29 @@ export const ActionCard = memo(function ActionCard({
         ))}
       </dl>
 
+      {pending && warnings.length > 0 && (
+        <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+          <p className="mb-1 flex items-center gap-1 font-medium">
+            <TriangleAlert className="h-3.5 w-3.5" />
+            אזהרת מדיניות
+          </p>
+          <ul className="mb-2 list-disc space-y-0.5 ps-4">
+            {warnings.map((w) => (
+              <li key={w.ruleId}>{w.reasonHebrew}</li>
+            ))}
+          </ul>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={!needsAck}
+              onChange={(e) => setAckedKey(e.target.checked ? warningKey : null)}
+              className="h-3.5 w-3.5 accent-amber-600"
+            />
+            קראתי והבנתי את האזהרות
+          </label>
+        </div>
+      )}
+
       {pending && intent.humanFields?.length ? (
         <div className="mb-3 space-y-2 rounded-lg bg-slate-50 p-2">
           <p className="text-xs text-slate-500">פרטים מזהים — מלא כאן (לא נשלחים לעוזר):</p>
@@ -137,7 +173,7 @@ export const ActionCard = memo(function ActionCard({
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => decide("APPROVE")}
-            disabled={busy || missingRequired}
+            disabled={busy || missingRequired || needsAck}
             className={cn(
               "flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50",
               intent.destructive ? "bg-red-600 hover:bg-red-700" : "bg-violet-600 hover:bg-violet-700"

@@ -19,6 +19,9 @@ import { TAG_CATEGORIES, TAG_COLOR_PALETTE, parseCaseTags } from "@/types/case-t
 import { TASK_PRIORITIES } from "@/lib/schemas/task-schema";
 import { formatDay, parseDay } from "@/lib/ai/tools/intent";
 import { resolveCase, resolveClient, resolveStaff } from "@/lib/ai/tools/resolve";
+import { deadlineSoon, notInPast } from "@/lib/jev/rules/dates";
+import { assigneeApproved, assigneeLoad } from "@/lib/jev/rules/assignee";
+import { caseHasDependents, caseNotInFlight } from "@/lib/jev/rules/cases";
 import type { ActionDefinition, DisplayParam } from "@/lib/ai/tools/types";
 import type { CaseStatus } from "@/types";
 
@@ -82,6 +85,12 @@ const createCaseAction: ActionDefinition<z.infer<typeof createParams>> = {
   },
   argsSchema: createArgs,
   paramsSchema: createParams,
+  jevRules: [
+    notInPast("case.deadline_not_past", "מועד ההגשה", (p) => p.submissionDeadline),
+    deadlineSoon("case.deadline_soon", "מועד ההגשה", (p) => p.submissionDeadline),
+    assigneeApproved((p) => p.assignedAgentId),
+    assigneeLoad((p) => p.assignedAgentId),
+  ],
   async resolve(raw) {
     const args = createArgs.parse(raw);
     const client = await resolveClient(args.clientName);
@@ -187,6 +196,12 @@ const updateCaseAction: ActionDefinition<z.infer<typeof updateParams>> = {
   },
   argsSchema: updateArgs,
   paramsSchema: updateParams,
+  jevRules: [
+    notInPast("case.deadline_not_past", "מועד ההגשה", (p) => p.submissionDeadline),
+    deadlineSoon("case.deadline_soon", "מועד ההגשה", (p) => p.submissionDeadline),
+    assigneeApproved((p) => p.assignedAgentId),
+    assigneeLoad((p) => p.assignedAgentId),
+  ],
   async resolve(raw) {
     const args = updateArgs.parse(raw);
     const kase = await resolveCase(args.caseNumber);
@@ -337,6 +352,7 @@ const deleteCaseAction: ActionDefinition<z.infer<typeof deleteParams>> = {
   },
   argsSchema: deleteArgs,
   paramsSchema: deleteParams,
+  jevRules: [caseNotInFlight, caseHasDependents],
   async resolve(raw) {
     const args = deleteArgs.parse(raw);
     const row = await prisma.case.findUnique({

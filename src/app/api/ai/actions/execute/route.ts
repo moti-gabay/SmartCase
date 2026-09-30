@@ -19,6 +19,7 @@ import {
   pickHumanInput,
   userFacingError,
 } from "@/lib/ai/tools/intent";
+import { blockedReason, evaluateJev, toWarnings, unacknowledged } from "@/lib/jev/engine";
 import type { ActionActor } from "@/lib/ai/tools/types";
 import type { UserRole } from "@/types";
 
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
 
   const parsed = executeBodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: INVALID }, { status: 400 });
-  const { intentId, decision, humanInput } = parsed.data;
+  const { intentId, decision, humanInput, acknowledgedWarnings } = parsed.data;
 
   const intent = await loadIntent(intentId);
   // Foreign intents are indistinguishable from missing ones.
@@ -84,6 +85,11 @@ export async function POST(req: Request) {
     }
   }
 
+  // Tampered persisted params must fail *after* the claim (audited FAILED), so
+  // parse leniently here and let the post-claim parse below throw as before.
+  const parsedParams = decision === "APPROVE" ? def.paramsSchema.safeParse(intent.meta.params) : null;
+  const params = parsedParams?.success ? parsedParams.data : undefined;
+
   // Claim the decision. Returns the refusal (if any) computed under the lock.
   const claim = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(${intentId}))) AS l`;
@@ -102,18 +108,49 @@ export async function POST(req: Request) {
       await tx.auditLog.create({ data: audit(AUDIT.DENIED, { role: actor.role }) });
       return { status: 403, error: "אין לך הרשאה לבצע פעולה זו" } as const;
     }
+    // JEV double verification: reads run on `tx` under the per-intent lock, so
+    // the policy sees current state, not the proposal-time snapshot.
+    const jev = await evaluateJev(params === undefined ? undefined : (def.jevRules as never), params as never, { actor, db: tx, now: new Date() });
+    if (jev.status === "BLOCKED") {
+      const message = blockedReason(jev);
+      await tx.auditLog.create({
+        data: audit(AUDIT.JEV_BLOCKED, { phase: "EXECUTE", message, verdicts: jev.verdicts, evaluated: jev.evaluated }),
+      });
+      return { status: 422, error: message, blocked: true } as const;
+    }
+    // A warning the card never showed (new since the proposal) must be seen
+    // first: 409 without a decision row, so the intent stays approvable.
+    const pendingWarnings = unacknowledged(toWarnings(jev), acknowledgedWarnings);
+    if (pendingWarnings.length > 0) {
+      return { status: 409, error: "יש לאשר את אזהרות המדיניות לפני הביצוע", warnings: pendingWarnings } as const;
+    }
+    if (jev.evaluated.length > 0) {
+      await tx.auditLog.create({
+        data: audit(AUDIT.JEV_EVALUATED, {
+          phase: "EXECUTE",
+          status: jev.status,
+          verdicts: jev.verdicts,
+          evaluated: jev.evaluated,
+          acknowledged: acknowledgedWarnings ?? [],
+        }),
+      });
+    }
     await tx.auditLog.create({ data: audit(AUDIT.APPROVED) });
     return { approved: true } as const;
   });
 
-  if ("error" in claim) return NextResponse.json({ error: claim.error }, { status: claim.status });
+  if ("error" in claim) {
+    return NextResponse.json(
+      { error: claim.error, ...("warnings" in claim && { warnings: claim.warnings }), ...("blocked" in claim && { status: "BLOCKED" }) },
+      { status: claim.status }
+    );
+  }
   if ("cancelled" in claim) return NextResponse.json({ ok: true, status: "CANCELLED" });
 
   // Outside the claim transaction: execute paths own their own writes and
   // revalidation. The APPROVED row already blocks any replay.
   try {
-    const params = def.paramsSchema.parse(intent.meta.params);
-    const result = await def.execute(params as never, actor, human);
+    const result = await def.execute(def.paramsSchema.parse(intent.meta.params) as never, actor, human);
     await prisma.auditLog.create({
       data: audit(result.ok ? AUDIT.EXECUTED : AUDIT.FAILED, {
         message: result.message,

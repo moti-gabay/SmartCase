@@ -17,16 +17,23 @@ export const AUDIT = {
   FAILED: "AI_ACTION_FAILED",
   CANCELLED: "AI_ACTION_CANCELLED",
   DENIED: "AI_ACTION_DENIED",
+  // JEV policy layer. Execute-time rows share the intent's entityId; a
+  // proposal-time block has no intent, so it is keyed by tool name.
+  JEV_EVALUATED: "JEV_EVALUATED",
+  JEV_BLOCKED: "JEV_BLOCKED",
 } as const;
+export const JEV_ENTITY = "JEV";
 
 // Any of these means the intent has been decided — a second decision is refused.
-export const DECIDED_ACTIONS: readonly string[] = [AUDIT.APPROVED, AUDIT.CANCELLED, AUDIT.DENIED];
+export const DECIDED_ACTIONS: readonly string[] = [AUDIT.APPROVED, AUDIT.CANCELLED, AUDIT.DENIED, AUDIT.JEV_BLOCKED];
 
 export const executeBodySchema = z.object({
   intentId: z.string().min(1).max(64),
   decision: z.enum(["APPROVE", "CANCEL"]),
   // Card-typed values for the proposal's humanFields (PII the model never saw).
   humanInput: z.record(z.string().max(40), z.string().max(300)).optional(),
+  // Rule ids of the JEV warnings the approver ticked "read and understood" for.
+  acknowledgedWarnings: z.array(z.string().max(64)).max(20).optional(),
 });
 
 // Checks card-typed input against the fields the proposal asked for: no extra
@@ -80,6 +87,8 @@ export function deriveIntentStatus(
   if (failed) return { status: "FAILED", message: failed.message };
   if (meta(AUDIT.CANCELLED)) return { status: "CANCELLED" };
   if (meta(AUDIT.DENIED)) return { status: "DENIED" };
+  const blocked = meta(AUDIT.JEV_BLOCKED);
+  if (blocked) return { status: "BLOCKED", message: (blocked as { message?: string }).message };
   if (meta(AUDIT.APPROVED)) return { status: "FAILED", message: "הביצוע לא הושלם" };
   return isIntentExpired(proposedAt, now) ? { status: "EXPIRED" } : { status: "PENDING" };
 }
@@ -93,6 +102,7 @@ export const INTENT_STATUS_NOTE: Record<IntentStatus, string> = {
   CANCELLED: "בוטלה על ידי המשתמש",
   DENIED: "נדחתה — אין הרשאה",
   EXPIRED: "פג תוקפה ללא אישור",
+  BLOCKED: "נחסמה ע״י מדיניות המערכת",
 };
 
 // Safety net for a model that *says* an action awaits approval without having
