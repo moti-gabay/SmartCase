@@ -10,6 +10,8 @@ import { prisma } from "@/lib/prisma";
 import { TASK_ACTIONS } from "@/lib/ai/tools/tasks-tools";
 import { CASE_ACTIONS } from "@/lib/ai/tools/cases-tools";
 import { CLIENT_ACTIONS } from "@/lib/ai/tools/clients-tools";
+import { APPOINTMENT_ACTIONS } from "@/lib/ai/tools/appointments-tools";
+import { DOCUMENT_ACTIONS } from "@/lib/ai/tools/docs-tools";
 import { AUDIT, INTENT_ENTITY, deriveIntentStatus, intentExpiresAt } from "@/lib/ai/tools/intent";
 import type { ActionActor, ActionDefinition, DisplayParam, HumanField, ProposedActionIntent } from "@/lib/ai/tools/types";
 
@@ -17,6 +19,8 @@ const ACTIONS: readonly ActionDefinition<never>[] = [
   ...TASK_ACTIONS,
   ...CASE_ACTIONS,
   ...CLIENT_ACTIONS,
+  ...APPOINTMENT_ACTIONS,
+  ...DOCUMENT_ACTIONS,
 ] as ActionDefinition<never>[];
 const BY_NAME = new Map(ACTIONS.map((a) => [a.name, a]));
 

@@ -35,6 +35,19 @@ export function sseEncode(event: ChatSseEvent, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
+// The history window can open mid-conversation on an assistant turn. Gemini
+// rejects contents whose first turn is a model turn (notably a replayed
+// functionCall), which failed the whole request once a thread outgrew
+// HISTORY_MESSAGES. A replayed functionResponse is a "user" turn too, but one
+// without its functionCall is equally invalid — so the start must be a real
+// user message. Drops leading turns in place until it is.
+export function trimToUserStart<T extends { role?: string; parts?: object[] }>(contents: T[]): T[] {
+  const isUserMessage = (c: T) =>
+    c.role === "user" && !(c.parts ?? []).some((p) => "functionResponse" in p);
+  while (contents.length > 0 && !isUserMessage(contents[0])) contents.shift();
+  return contents;
+}
+
 // Model-supplied `limit` arg → safe integer within [1, max].
 export function clampLimit(raw: unknown, max = 20, fallback = 10): number {
   const n = typeof raw === "number" ? Math.trunc(raw) : NaN;

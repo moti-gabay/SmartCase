@@ -116,3 +116,34 @@ export function parseDay(value: string): Date {
 export function formatDay(date: Date | string): string {
   return new Date(date).toLocaleDateString("he-IL", { timeZone: "Asia/Jerusalem" });
 }
+
+const IL_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Jerusalem",
+  hourCycle: "h23",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+// Wall-clock time in Israel → the UTC instant. The model and staff speak local
+// time ("Tuesday at 10:00"); slots are stored as instants. The offset is read
+// from the tz database at that instant, so IST/IDT transitions are handled.
+export function israelDateTimeToUtc(day: string, time: string): Date {
+  const naive = new Date(`${day}T${time}:00.000Z`);
+  const p = Object.fromEntries(IL_PARTS.formatToParts(naive).map((x) => [x.type, x.value]));
+  const asLocal = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute);
+  return new Date(naive.getTime() - (asLocal - naive.getTime()));
+}
+
+export function formatDateTime(date: Date): string {
+  return date.toLocaleString("he-IL", {
+    timeZone: "Asia/Jerusalem",
+    day: "numeric",
+    month: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}

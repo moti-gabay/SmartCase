@@ -3,6 +3,7 @@
 // server actions / route handlers — never from a "use client" module.
 import { prisma } from "@/lib/prisma";
 import { isPortalLocale, type PortalLocale } from "@/lib/i18n/conversion-portal";
+import { toAiValidation } from "@/lib/utils";
 import type {
   DashboardStats,
   CaseSummary,
@@ -402,8 +403,7 @@ export async function getCaseDetail(id: string): Promise<CaseDetail | null> {
             issueDate: iso(item.document.issueDate) ?? undefined,
             expiryDate: iso(item.document.expiryDate) ?? undefined,
             aiSummary: item.document.aiSummary ?? undefined,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            aiValidation: (item.document.aiValidation as any) ?? undefined,
+            aiValidation: toAiValidation(item.document.aiValidation),
             isAiReviewed: item.document.isAiReviewed,
             uploadedByName: item.document.uploadedBy?.name ?? undefined,
             reviewNotes: item.document.reviewNotes ?? undefined,

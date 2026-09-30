@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
 import { resolvePortalToken } from "@/lib/queries";
-import { logCaseActivity } from "@/lib/activity";
+import { bookSlotForCase } from "@/lib/services/meeting-slots";
 import { SLOT_MIN_LEAD_MS } from "@/lib/portal/journey";
 
 // PUBLIC, UNAUTHENTICATED. Books one published meeting slot for the case behind
@@ -48,46 +47,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
     // here against the server's own clock. Only this answer counts.
     const earliest = new Date(Date.now() + SLOT_MIN_LEAD_MS);
 
-    const booked = await prisma.$transaction(async (tx) => {
-      // Rebooking releases the case's previous slot first — bookedCaseId is
-      // unique, so the claim below would otherwise collide with it. A slot the
-      // office created for a court hearing (isPublished: false) is not the
-      // client's to release, and is left alone.
-      await tx.meetingSlot.updateMany({
-        where: { bookedCaseId: caseId, isPublished: true },
-        data: { bookedCaseId: null, bookedAt: null },
-      });
-
-      // The claim. Every precondition lives in the WHERE, so two clients racing
-      // for the last slot cannot both win: the loser's updateMany matches zero
-      // rows because bookedCaseId is no longer null.
-      const claim = await tx.meetingSlot.updateMany({
-        where: {
-          id: slotId,
-          isPublished: true,
-          bookedCaseId: null,
-          startsAt: { gte: earliest },
-        },
-        data: { bookedCaseId: caseId, bookedAt: new Date() },
-      });
-      if (claim.count === 0) return null;
-
-      const slot = await tx.meetingSlot.findUnique({
-        where: { id: slotId },
-        select: { id: true, startsAt: true, durationMinutes: true, location: true },
-      });
-      if (!slot) return null;
-
-      await logCaseActivity(
-        tx,
-        caseId,
-        "MEETING_SCHEDULED",
-        `הלקוח קבע פגישה ל-${slot.startsAt.toISOString().slice(0, 16).replace("T", " ")}.`,
-        { slotId: slot.id, startsAt: slot.startsAt.toISOString() },
-        null,
-      );
-
-      return slot;
+    // The case comes from the token above, never the body; the claim itself
+    // (release previous + atomic WHERE-pinned claim) lives in the shared service.
+    const booked = await bookSlotForCase({
+      caseId,
+      slotId,
+      earliest,
+      actorId: null,
+      describe: (startsAt) => `הלקוח קבע פגישה ל-${startsAt.toISOString().slice(0, 16).replace("T", " ")}.`,
     });
 
     // 409, not 404: the slot may well exist — it is simply no longer claimable.
