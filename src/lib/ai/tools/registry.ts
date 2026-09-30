@@ -12,6 +12,8 @@ import { CASE_ACTIONS } from "@/lib/ai/tools/cases-tools";
 import { CLIENT_ACTIONS } from "@/lib/ai/tools/clients-tools";
 import { APPOINTMENT_ACTIONS } from "@/lib/ai/tools/appointments-tools";
 import { DOCUMENT_ACTIONS } from "@/lib/ai/tools/docs-tools";
+import { AI_ACTIONS } from "@/lib/ai/tools/ai-tools";
+import { USER_ACTIONS } from "@/lib/ai/tools/users-tools";
 import { AUDIT, INTENT_ENTITY, deriveIntentStatus, intentExpiresAt } from "@/lib/ai/tools/intent";
 import type { ActionActor, ActionDefinition, DisplayParam, HumanField, ProposedActionIntent } from "@/lib/ai/tools/types";
 
@@ -21,6 +23,8 @@ const ACTIONS: readonly ActionDefinition<never>[] = [
   ...CLIENT_ACTIONS,
   ...APPOINTMENT_ACTIONS,
   ...DOCUMENT_ACTIONS,
+  ...AI_ACTIONS,
+  ...USER_ACTIONS,
 ] as ActionDefinition<never>[];
 const BY_NAME = new Map(ACTIONS.map((a) => [a.name, a]));
 
@@ -46,6 +50,10 @@ export function describeActions(role: string): string {
 
 interface ProposalMeta {
   tool: string;
+  // The model's validated args, kept so history can replay the real call —
+  // replaying `args: {}` taught the model to call action tools with no args.
+  // Never contains card-typed PII (not a model param; see the registry test).
+  args?: Record<string, unknown>;
   domain: string;
   verb: string;
   params: unknown;
@@ -83,6 +91,7 @@ export async function proposeAction(
 
   const meta: ProposalMeta = {
     tool: def.name,
+    args: parsed.data as Record<string, unknown>,
     domain: def.domain,
     verb: def.verb,
     params: resolved.params,
@@ -140,9 +149,19 @@ export async function loadIntent(intentId: string): Promise<LoadedIntent | null>
   return row ? { id: row.id, userId: row.userId, createdAt: row.createdAt, meta: row.metadata as unknown as ProposalMeta } : null;
 }
 
+// Server-side card: the UI payload plus the model args for history replay.
+// Strip `args` before anything leaves the server.
+export type IntentCard = ProposedActionIntent & { args?: Record<string, unknown> };
+
+export function toClientCard(card: IntentCard): ProposedActionIntent {
+  const out = { ...card };
+  delete out.args;
+  return out;
+}
+
 // Rebuilds card payloads (with current status) for chat history hydration.
-export async function loadIntentCards(intentIds: string[], userId: string): Promise<Map<string, ProposedActionIntent>> {
-  const out = new Map<string, ProposedActionIntent>();
+export async function loadIntentCards(intentIds: string[], userId: string): Promise<Map<string, IntentCard>> {
+  const out = new Map<string, IntentCard>();
   if (intentIds.length === 0) return out;
   const [proposals, followUps] = await Promise.all([
     prisma.auditLog.findMany({
@@ -171,6 +190,7 @@ export async function loadIntentCards(intentIds: string[], userId: string): Prom
       status: state.status,
       resultMessage: state.message,
       entityHref: state.entityHref,
+      args: meta.args,
     });
   }
   return out;

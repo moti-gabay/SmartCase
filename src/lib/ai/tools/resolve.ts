@@ -128,3 +128,22 @@ export async function resolveLetter(
   });
   return row ? { value: row } : { error: "לא נמצא מכתב בתיק — אפשר להפיק מכתב חדש עם generate_letter" };
 }
+
+// Any status — approving a PENDING registration is the main use. Emails are
+// masked out of user text before the model reads it, so lookup is by name;
+// candidates disambiguate by role, status and join date, never by email.
+export async function resolveUser(
+  name: string,
+  describe: (u: { name: string; role: string; status: string; createdAt: Date }) => string
+): Promise<Resolved<{ id: string; name: string; role: string; status: string }>> {
+  const rows = await prisma.user.findMany({
+    where: { name: { contains: name, mode: "insensitive" } },
+    select: { id: true, name: true, role: true, status: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+    take: 6,
+  });
+  const exact = rows.filter((r) => r.name === name);
+  if (exact.length === 1 || rows.length === 1) return { value: exact[0] ?? rows[0] };
+  if (rows.length === 0) return { error: `לא נמצא משתמש בשם "${name}"` };
+  return { error: `נמצאו כמה משתמשים בשם "${name}" — בקש מהמשתמש לבחור`, candidates: rows.map(describe) };
+}

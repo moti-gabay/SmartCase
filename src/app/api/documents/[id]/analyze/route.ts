@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/../auth";
+import { requireStaffSession } from "@/lib/authz";
 import { analyzeAndAutomateDocument } from "@/lib/services/document-analysis";
 
 // Step 4 of the upload, and the entry point of the dynamic document workflow:
@@ -14,8 +14,9 @@ import { analyzeAndAutomateDocument } from "@/lib/services/document-analysis";
 // assistant's analyze_document action); this route only maps the outcome.
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
+  const guard = await requireStaffSession();
+  if ("denied" in guard) return guard.denied;
+  const { session } = guard;
 
   try {
     const { id } = await params;

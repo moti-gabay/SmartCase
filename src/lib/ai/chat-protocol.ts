@@ -8,6 +8,9 @@ export const MAX_TOOL_ROUNDS = 5;
 export const MAX_MESSAGE_CHARS = 4000;
 export const TOOL_RESULT_MAX_CHARS = 4000;
 export const TOOL_TIMEOUT_MS = 10_000;
+// Read tools that make their own model call (e.g. summarize_case) need longer
+// than a DB query; still well inside STREAM_DEADLINE_MS.
+export const SLOW_TOOL_TIMEOUT_MS = 30_000;
 export const STREAM_DEADLINE_MS = 55_000;
 export const HEARTBEAT_MS = 15_000;
 export const HISTORY_MESSAGES = 20;

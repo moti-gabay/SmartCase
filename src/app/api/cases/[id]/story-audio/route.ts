@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/../auth";
+import { requireStaffSession } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { presignDownload } from "@/core/storage/s3-storage";
 
@@ -15,8 +15,8 @@ import { presignDownload } from "@/core/storage/s3-storage";
 // Mirrors /api/documents/[id]: redirect to a short-lived presigned GET so the
 // audio bytes never stream through the function.
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
+  const guard = await requireStaffSession();
+  if ("denied" in guard) return guard.denied;
 
   const { id } = await params;
   const profile = await prisma.conversionProfile.findUnique({

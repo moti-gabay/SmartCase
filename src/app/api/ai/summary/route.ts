@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/../auth";
-import { prisma } from "@/lib/prisma";
-import { summarizeCallHebrew } from "@/lib/ai/gemini";
+import { requireStaffSession } from "@/lib/authz";
+import { generateCallSummary } from "@/lib/services/summaries";
 
 // Unlock the longer serverless execution budget for AI generation (matches the
 // /api/ai/** allocation in vercel.json). Kept explicit so the route carries its
@@ -11,8 +10,8 @@ export const maxDuration = 60;
 // Generate-only: raw conversation notes → structured Hebrew summary. Persists
 // nothing — the staff member reviews/edits, then commits via commitAiSummary.
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
+  const guard = await requireStaffSession();
+  if ("denied" in guard) return guard.denied;
 
   try {
     const { caseId, rawInput } = await req.json().catch(() => ({}));
@@ -20,17 +19,9 @@ export async function POST(req: Request) {
     if (typeof caseId !== "string" || !caseId) {
       return NextResponse.json({ error: "חסר מזהה תיק" }, { status: 400 });
     }
-    if (typeof rawInput !== "string" || rawInput.trim().length < 10) {
-      return NextResponse.json({ error: "יש להזין טקסט שיחה לסיכום (לפחות 10 תווים)" }, { status: 400 });
-    }
-
-    const exists = await prisma.case.findUnique({ where: { id: caseId }, select: { id: true } });
-    if (!exists) return NextResponse.json({ error: "התיק לא נמצא" }, { status: 404 });
-
-    const summary = await summarizeCallHebrew(rawInput.trim());
-    if (!summary.trim()) return NextResponse.json({ error: "יצירת הסיכום נכשלה" }, { status: 502 });
-
-    return NextResponse.json({ summary });
+    const outcome = await generateCallSummary(caseId, typeof rawInput === "string" ? rawInput : "");
+    if (!outcome.ok) return NextResponse.json({ error: outcome.error }, { status: outcome.status });
+    return NextResponse.json({ summary: outcome.summary });
   } catch (err) {
     console.error("[ai/summary]", err);
     return NextResponse.json({ error: "יצירת הסיכום נכשלה" }, { status: 500 });

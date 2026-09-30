@@ -19,9 +19,10 @@ import {
   isActionTool,
   loadIntentCards,
   proposeAction,
+  toClientCard,
+  type IntentCard,
 } from "@/lib/ai/tools/registry";
 import { INTENT_STATUS_NOTE, PHANTOM_PROPOSAL_WARNING, claimsPendingAction } from "@/lib/ai/tools/intent";
-import type { ProposedActionIntent } from "@/lib/ai/tools/types";
 import type { UserRole } from "@/types";
 import { collectPiiValues, maskPii, type PiiTag } from "@/lib/ai/pii-sanitizer";
 import {
@@ -85,7 +86,9 @@ export async function GET() {
     messages: rows.map(({ toolCalls, ...m }) => {
       const proposals = intentIdsOf(toolCalls)
         .map((id) => cards.get(id))
-        .filter((c): c is ProposedActionIntent => !!c);
+        .filter((c): c is IntentCard => !!c)
+        // Model args are for history replay only — never sent to the browser.
+        .map(toClientCard);
       return proposals.length ? { ...m, proposals } : m;
     }),
   });
@@ -158,15 +161,17 @@ export async function POST(req: Request) {
   // really were, with the final outcome in the response. Replaying them as
   // plain text taught the model that "a proposal awaits approval" is something
   // it can simply *say* — it then skipped the tool call on later requests.
-  // Args are not persisted (PII policy), so the replayed call carries none.
   const contents: Content[] = history.reverse().flatMap((m): Content[] => {
     const text: Content = { role: m.role === "USER" ? "user" : "model", parts: [{ text: m.content }] };
+    // Proposals saved before args were persisted cannot be replayed faithfully;
+    // an argument-less call is exactly what taught the model the wrong shape,
+    // so those turns fall back to their text alone.
     const cards = intentIdsOf(m.toolCalls)
       .map((id) => historyCards.get(id))
-      .filter((c): c is ProposedActionIntent => !!c);
+      .filter((c): c is IntentCard & { args: Record<string, unknown> } => !!c?.args);
     if (m.role === "USER" || cards.length === 0) return [text];
     return [
-      { role: "model", parts: cards.map((c) => ({ functionCall: { name: c.tool, args: {} } })) },
+      { role: "model", parts: cards.map((c) => ({ functionCall: { name: c.tool, args: c.args } })) },
       {
         role: "user",
         parts: cards.map((c) => ({
@@ -231,6 +236,10 @@ export async function POST(req: Request) {
           temperature: 0.3,
         };
 
+        // Gemini occasionally returns an empty candidate (no text, no call) on a
+        // function-calling turn — seen repeatedly in E2E. One retry per request
+        // recovers it; a second empty round is reported as before.
+        let emptyRetried = false;
         for (let round = 0; round < MAX_TOOL_ROUNDS && !aborted; round++) {
           const response = await ai.models.generateContentStream({ model: CHAT_MODEL, contents, config });
           const calls: FunctionCall[] = [];
@@ -243,6 +252,12 @@ export async function POST(req: Request) {
             }
             modelParts.push(...(chunk.candidates?.[0]?.content?.parts ?? []));
             if (chunk.functionCalls?.length) calls.push(...chunk.functionCalls);
+          }
+          const empty = calls.length === 0 && !modelParts.some((p) => p.text);
+          if (!aborted && empty && !emptyRetried && Date.now() < deadline) {
+            emptyRetried = true;
+            round--;
+            continue;
           }
           if (aborted || calls.length === 0) break;
 

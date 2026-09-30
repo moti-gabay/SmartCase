@@ -17,7 +17,8 @@ import {
   USER_ROLE_LABELS,
   USER_STATUS_LABELS,
 } from "@/lib/constants";
-import { capToolResult, clampLimit, TOOL_TIMEOUT_MS } from "@/lib/ai/chat-protocol";
+import { capToolResult, clampLimit, SLOW_TOOL_TIMEOUT_MS, TOOL_TIMEOUT_MS } from "@/lib/ai/chat-protocol";
+import { generateCallSummary } from "@/lib/services/summaries";
 import { SLOT_MIN_LEAD_MS } from "@/lib/portal/journey";
 
 type ToolResult = Record<string, unknown>;
@@ -288,6 +289,22 @@ async function getAvailableSlots(args: ToolArgs): Promise<ToolResult> {
   };
 }
 
+// Draft only — nothing is saved. The model shows the draft; saving it to the
+// case timeline is the commit_ai_summary action, behind a confirmation card.
+async function summarizeCase(args: ToolArgs): Promise<ToolResult> {
+  const caseNumber = strArg(args, "caseNumber");
+  const notes = typeof args.notes === "string" ? args.notes.slice(0, 8000) : "";
+  if (!caseNumber) return { error: "חסר caseNumber" };
+  const row = await prisma.case.findUnique({ where: { caseNumber }, select: { id: true } });
+  if (!row) return { error: `לא נמצא תיק עם מספר ${caseNumber}` };
+  const outcome = await generateCallSummary(row.id, notes);
+  if (!outcome.ok) return { error: outcome.error };
+  return {
+    draftSummary: outcome.summary,
+    note: "טיוטה בלבד — לא נשמרה. הצג אותה למשתמש, ורק אם ירצה לשמור — הצע commit_ai_summary עם הטקסט המאושר.",
+  };
+}
+
 // ADMIN only — gated in getToolDeclarations AND re-checked in the dispatcher.
 async function getUserStats(): Promise<ToolResult> {
   const [byRole, byStatus, pending] = await Promise.all([
@@ -398,6 +415,19 @@ const BASE_DECLARATIONS: FunctionDeclaration[] = [
     },
   },
   {
+    name: "summarize_case",
+    description:
+      "טיוטת סיכום מובנה בעברית לרשימות שיחה/פגישה של תיק (AI). לא שומר דבר — לשמירה בציר הפעילות הצע commit_ai_summary.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        caseNumber: str("מספר התיק"),
+        notes: str("רשימות השיחה או הפגישה לסיכום (לפחות 10 תווים)"),
+      },
+      required: ["caseNumber", "notes"],
+    },
+  },
+  {
     name: "get_alerts",
     description: "ההתראות הפעילות: תיקים באיחור, מועדי הגשה מתקרבים, מסמכים חסרים.",
     parameters: { type: Type.OBJECT, properties: {} },
@@ -425,9 +455,12 @@ const EXECUTORS: Record<string, (args: ToolArgs) => Promise<ToolResult>> = {
   get_document_summary: getDocumentSummary,
   get_task_load: getTaskLoad,
   get_available_slots: getAvailableSlots,
+  summarize_case: summarizeCase,
   get_alerts: () => getAlerts().then((alerts) => ({ results: alerts })),
   get_user_stats: getUserStats,
 };
+
+const SLOW_TOOLS = new Set(["summarize_case"]);
 
 export async function executeAssistantTool(
   name: string,
@@ -445,7 +478,10 @@ export async function executeAssistantTool(
     const result = await Promise.race([
       executor(args ?? {}),
       new Promise<ToolResult>((resolve) =>
-        setTimeout(() => resolve({ error: "תם הזמן המוקצב לשאילתה" }), TOOL_TIMEOUT_MS)
+        setTimeout(
+          () => resolve({ error: "תם הזמן המוקצב לשאילתה" }),
+          SLOW_TOOLS.has(name) ? SLOW_TOOL_TIMEOUT_MS : TOOL_TIMEOUT_MS
+        )
       ),
     ]);
     return capToolResult(result);
