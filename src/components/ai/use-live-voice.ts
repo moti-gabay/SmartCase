@@ -20,13 +20,14 @@ import {
   type LiveTurn,
 } from "@/lib/ai/live-protocol";
 import { SPEECH_RMS_THRESHOLD, classifyMediaError } from "@/lib/ai/voice-input";
+import type { ProposedActionIntent } from "@/lib/ai/tools/types";
 
 // Local speech indicator only — server VAD is authoritative for barge-in.
 const QUIET_AFTER_MS = 700;
 // Small lead so the first chunk of a response isn't scheduled in the past.
 const PLAYBACK_LEAD_S = 0.02;
 
-type ToolRecord = { name: string; ok: boolean; ms: number };
+type ToolRecord = { name: string; ok: boolean; ms: number; intentId?: string };
 
 function toBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
@@ -46,6 +47,9 @@ export function useLiveVoice(opts: {
   getConversationId: () => string | null;
   onConversationId: (id: string) => void;
   onCommitted: (turns: LiveTurn[]) => void;
+  // A voice-requested action became a proposal: render its card now. Approval
+  // stays a click on that card — nothing in this hook can approve.
+  onProposal: (intent: ProposedActionIntent) => void;
 }) {
   const [state, dispatch] = useReducer(liveReducer, LIVE_INITIAL);
   // Uncommitted transcript of the current exchange, shown as provisional bubbles.
@@ -180,7 +184,11 @@ export function useLiveVoice(opts: {
           const res = await fetch("/api/ai/live/tool", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: call.name, args: call.args ?? {} }),
+            body: JSON.stringify({
+              name: call.name,
+              args: call.args ?? {},
+              conversationId: conversationIdRef.current,
+            }),
           });
           const data = await res.json();
           if (res.ok) {
@@ -190,7 +198,9 @@ export function useLiveVoice(opts: {
               name: call.name ?? "",
               ok: data.ok,
               ms: data.ms,
+              ...(data.intent ? { intentId: data.intent.intentId } : {}),
             });
+            if (data.intent && gen === genRef.current) optsRef.current.onProposal(data.intent);
           }
         } catch {
           /* answered with the generic error so the model's turn can complete */

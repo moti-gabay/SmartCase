@@ -75,6 +75,7 @@ export function AssistantDrawer() {
     getConversationId,
     setConversationId,
     appendMessages,
+    appendProposal,
   } = useChatStream();
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -96,6 +97,7 @@ export function AssistantDrawer() {
       (turns: LiveTurn[]) => appendMessages(turns.map((t) => ({ role: t.role, content: t.text }))),
       [appendMessages]
     ),
+    onProposal: appendProposal,
   });
   const liveOn = isLiveActive(live.status) || live.status === "CLOSING";
   const hangUp = live.hangUp;
@@ -122,13 +124,16 @@ export function AssistantDrawer() {
 
   // "תיקון": retire the current proposal and hand the composer back so the
   // user can dictate or type the correction; the model then re-proposes.
+  // In Live Voice Mode the composer is replaced by the visualizer, so the
+  // correction is simply spoken; the card is still retired by a click here.
   const refine = useCallback(
     (intent: ProposedActionIntent) => {
       void decide(intent.intentId, "CANCEL");
+      if (liveOn) return;
       setInput((prev) => prev || `תיקון להצעה "${intent.summaryHebrew}": `);
       inputRef.current?.focus();
     },
-    [decide]
+    [decide, liveOn]
   );
 
   const submit = () => {
