@@ -188,6 +188,13 @@ export function useChatStream() {
   const setConversationId = useCallback((id: string) => {
     conversationIdRef.current = id;
   }, []);
+  // Live Voice Mode proposals: shown immediately as a standalone card.
+  const appendProposal = useCallback((intent: ProposedActionIntent) => {
+    setMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), role: "ASSISTANT", content: "", proposals: [intent] },
+    ]);
+  }, []);
   const appendMessages = useCallback((turns: Omit<ChatMessage, "id">[]) => {
     setMessages((prev) => [...prev, ...turns.map((t) => ({ ...t, id: crypto.randomUUID() }))]);
   }, []);
@@ -205,5 +212,6 @@ export function useChatStream() {
     getConversationId,
     setConversationId,
     appendMessages,
+    appendProposal,
   };
 }

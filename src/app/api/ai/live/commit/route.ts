@@ -9,7 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { maskPii, type PiiTag } from "@/lib/ai/pii-sanitizer";
 import { unsealPii } from "@/lib/ai/pii-seal";
 import { FALLBACK_TEXT, STORED_MESSAGE_MAX_CHARS, sliceMaskSafe } from "@/lib/ai/chat-protocol";
-import { normalizeTurns, parseTurns } from "@/lib/ai/live-protocol";
+import { normalizeTurns, parseTurns, withProposalLead } from "@/lib/ai/live-protocol";
 
 export const runtime = "nodejs";
 
@@ -52,16 +52,21 @@ export async function POST(req: Request) {
     for (const [v, tag] of values) known.set(v, tag);
   }
 
-  // Only {name, ok, ms} — args are never persisted (see pii-sanitizer.ts).
+  // Only {name, ok, ms, intentId?} — args are never persisted (see
+  // pii-sanitizer.ts). intentId links a voice proposal's card into history;
+  // an id that is not this user's proposal simply never rehydrates
+  // (loadIntentCards filters by userId).
   const toolRecords = tools
     .filter((t): t is Record<string, unknown> => !!t && typeof t === "object")
     .map((t) => ({
       name: String(t.name ?? "").slice(0, 64),
       ok: t.ok === true,
       ms: Number(t.ms) || 0,
+      ...(typeof t.intentId === "string" && t.intentId.length <= 64 ? { intentId: t.intentId } : {}),
     }));
 
-  const rows = normalizeTurns(turns, FALLBACK_TEXT).map((t) => ({
+  const hasProposal = toolRecords.some((t) => "intentId" in t);
+  const rows = normalizeTurns(withProposalLead(turns, hasProposal), FALLBACK_TEXT).map((t) => ({
     conversationId,
     role: t.role,
     content: sliceMaskSafe(maskPii(t.text, t.role === "ASSISTANT" ? known : undefined), STORED_MESSAGE_MAX_CHARS),
